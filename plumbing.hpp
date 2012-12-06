@@ -212,61 +212,6 @@ namespace Plumbing
 
             return std::move(e);
         }
-
-        // maintains write position in fifo
-        //class In {
-            //Pipe& pipe_;
-
-        //public:
-            //In(Pipe& pipe) : pipe_(pipe) { }
-
-            //class iterator {
-                //Pipe& pipe_;
-
-            //public:
-                //iterator(Pipe& pipe ) : pipe_(pipe) { }
-
-                //T& operator *()
-                //{
-                    //return T(); // use current write pointer
-                //}
-            //};
-
-            //iterator begin()
-            //{
-                //return iterator(*this);
-            //}
-        //};
-
-        //class Out {
-            //Pipe& pipe_;
-
-        //public:
-            //Out(Pipe& pipe) : pipe_(pipe) { }
-
-            //class iterator {
-                //Out& out_;
-
-            //public:
-                //iterator(Out& out) : out_(out) { }
-
-                //T operator *()
-                //{
-                    //return T(); // use current read pointer
-                //}
-            //};
-
-            //iterator begin()
-            //{
-                //return iterator(*this);
-            //}
-
-            //iterator end()
-            //{
-                //return iterator(*this);
-            //}
-        //};
-
     };
 
     namespace detail
