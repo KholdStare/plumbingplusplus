@@ -39,9 +39,9 @@ int main(int argc, char const *argv[])
             });
 
     std::thread b([&](){ 
-            while (pipe.isOpen())
-            {
-                std::cout << pipe.dequeue() << std::endl;
+            auto sink = MakeSink(pipe);
+            for (auto&& e : sink) {
+                std::cout << e << std::endl;
             }
             });
 

@@ -54,146 +54,6 @@ float convertToFloat(int in)
 
 namespace Plumbing
 {
-
-    namespace detail
-    {
-
-        template <typename InputIterable>
-        struct sink_traits
-        {
-            typedef InputIterable type;
-            typedef typename InputIterable::iterator iterator;
-            typedef typename std::iterator_traits<iterator>::value_type value_type;
-        };
-
-        template <typename T>
-        class SinkImplBase
-        {
-        public:
-            typedef T value_type;
-
-            virtual ~SinkImplBase () { }
-
-            virtual bool hasNext() = 0;
-            virtual T next() = 0;
-        
-        };
-
-        /**
-         * @note: InputIterable means has .begin() and .end()
-         * that return InputIterator
-         */
-        template <typename InputIterable>
-        class SinkImpl : public SinkImplBase<typename sink_traits<InputIterable>::value_type>
-        {
-            typedef SinkImpl<InputIterable> type;
-            typedef typename sink_traits<InputIterable>::iterator iterator;
-            typedef typename sink_traits<InputIterable>::value_type value_type;
-            iterator current_;
-            iterator end_;
-
-        public:
-
-            SinkImpl(InputIterable& iterable)
-                : current_(iterable.begin()),
-                  end_(iterable.end())
-            { }
-
-            ~SinkImpl() { }
-
-            bool hasNext()
-            {
-                return current_ != end_;
-            }
-
-            value_type next()
-            {
-                return *current_++;
-            }
-        };
-
-    }
-
-    template <typename T>
-    class Sink
-    {
-        std::shared_ptr<detail::SinkImplBase<T>> pimpl;
-
-    public:
-        typedef T value_type;
-        typedef T* pointer;
-        typedef T& reference;
-        typedef Sink<T> iterator;
-        typedef std::input_iterator_tag iterator_category;
-        typedef void difference_type; // TODO: is this ok?
-
-        Sink(Sink<T> const& other) = default;
-        Sink(Sink<T>&& other) = default;
-
-        /**
-         * Main constructor that uses type erasure to encapsulate an iterable
-         * object, with a single type of iterator.
-         *
-         * @note use boost::disable_if and SFINAE to disable the constructor
-         * for itself, otherwise this constructor gets interpreted as the copy
-         * constructor, and we get into an infinite loop of creating a new Sink
-         * from itself.
-         */
-        template <typename InputIterable,
-                  typename boost::disable_if< boost::is_same<InputIterable, Sink<T>>, int>::type = 0>
-        Sink(InputIterable& iterable)
-            : pimpl(new detail::SinkImpl<InputIterable>(iterable))
-        { }
-
-        /**
-         * Default constructor, creates an "end" iterator
-         */
-        Sink() : pimpl(nullptr) { }
-
-        iterator& begin() { return *this; }
-        iterator  end()   { return iterator(); }
-
-        iterator& operator ++ ()    { return *this; } ///< noop
-        iterator& operator ++ (int) { return *this; } ///< noop
-
-        /**
-         * To fullfil the input_iterator category, both returns the 
-         * the next element and advances the inner iterator
-         */
-        value_type operator * ()    { return pimpl->next(); }
-
-        bool operator == (iterator& other)
-        {
-            detail::SinkImplBase<T>* a = this->pimpl.get();
-            detail::SinkImplBase<T>* b = other.pimpl.get();
-            
-            if (a == b)
-            {
-                return true;
-            }
-
-            if (!a)
-            {
-                std::swap(a, b);
-            }
-
-            // an "end" iterator is:
-            // - either the default constructed iterator (pimpl is nullptr)
-            // - or has reached the end of iteration (hasNext() returns false)
-            return !(b || a->hasNext());
-        }
-
-        bool operator != (iterator& other) { return !(*this == other); }
-    };
-
-    template <typename InputIterable>
-    Sink<typename detail::sink_traits<InputIterable>::value_type>
-    MakeSink(InputIterable& iterable)
-    {
-        return Sink<typename detail::sink_traits<InputIterable>::value_type>(iterable);
-    }
-
-
     template <typename T>
     class Pipe
     {
@@ -408,6 +268,194 @@ namespace Plumbing
         //};
 
     };
+
+    namespace detail
+    {
+
+        template <typename InputIterable>
+        struct sink_traits
+        {
+            typedef InputIterable type;
+            typedef typename InputIterable::iterator iterator;
+            typedef typename std::iterator_traits<iterator>::value_type value_type;
+        };
+
+        template <typename T>
+        class SinkImplBase
+        {
+        public:
+            typedef T value_type;
+
+            virtual ~SinkImplBase () { }
+
+            virtual bool hasNext() = 0;
+            virtual T next() = 0;
+        
+        };
+
+        /**
+         * @note: InputIterable means has .begin() and .end()
+         * that return InputIterator
+         */
+        template <typename InputIterable>
+        class SinkImpl : public SinkImplBase<typename sink_traits<InputIterable>::value_type>
+        {
+            typedef SinkImpl<InputIterable> type;
+            typedef typename sink_traits<InputIterable>::iterator iterator;
+            typedef typename sink_traits<InputIterable>::value_type value_type;
+            iterator current_;
+            iterator end_;
+
+        public:
+
+            SinkImpl(InputIterable& iterable)
+                : current_(iterable.begin()),
+                  end_(iterable.end())
+            { }
+
+            ~SinkImpl() { }
+
+            bool hasNext()
+            {
+                return current_ != end_;
+            }
+
+            value_type next()
+            {
+                return *current_++;
+            }
+        };
+
+        /**
+         * Template specialization of sink_traits for Pipes
+         */
+        template <>
+        template <typename T>
+        struct sink_traits<Pipe<T>>
+        {
+            typedef Pipe<T> type;
+            typedef void iterator;
+            typedef T value_type;
+        };
+
+        /**
+         * Template specialization for Pipes
+         */
+        template <>
+        template <typename T>
+        class SinkImpl<Pipe<T>> : public SinkImplBase<T>
+        {
+            typedef Pipe<T> pipe_type;
+            typedef SinkImpl<pipe_type> type;
+            typedef T value_type;
+            Pipe<T>& pipe_;
+
+        public:
+
+            SinkImpl(Pipe<T>& pipe)
+                : pipe_(pipe)
+            { }
+
+            ~SinkImpl() { }
+
+            bool hasNext()
+            {
+                return pipe_.isOpen();
+            }
+
+            value_type next()
+            {
+                return pipe_.dequeue();
+            }
+        };
+    }
+
+    template <typename T>
+    class Sink
+    {
+        std::shared_ptr<detail::SinkImplBase<T>> pimpl;
+
+    public:
+        typedef T value_type;
+        typedef T* pointer;
+        typedef T& reference;
+        typedef Sink<T> iterator;
+        typedef std::input_iterator_tag iterator_category;
+        typedef void difference_type; // TODO: is this ok?
+
+        Sink(Sink<T> const& other) = default;
+        Sink(Sink<T>&& other) = default;
+
+        /**
+         * Main constructor that uses type erasure to encapsulate an iterable
+         * object, with a single type of iterator.
+         *
+         * @note use boost::disable_if and SFINAE to disable the constructor
+         * for itself, otherwise this constructor gets interpreted as the copy
+         * constructor, and we get into an infinite loop of creating a new Sink
+         * from itself.
+         */
+        template <typename InputIterable,
+                  typename boost::disable_if< boost::is_same<InputIterable, Sink<T>>, int>::type = 0>
+        Sink(InputIterable& iterable)
+            : pimpl(new detail::SinkImpl<InputIterable>(iterable))
+        { }
+
+        /**
+         * Default constructor, creates an "end" iterator
+         */
+        Sink() : pimpl(nullptr) { }
+
+        iterator& begin() { return *this; }
+        iterator  end()   { return iterator(); }
+
+        iterator& operator ++ ()    { return *this; } ///< noop
+        iterator& operator ++ (int) { return *this; } ///< noop
+
+        /**
+         * To fullfil the input_iterator category, both returns the 
+         * the next element and advances the inner iterator
+         */
+        value_type operator * ()    { return pimpl->next(); }
+
+        bool operator == (iterator& other)
+        {
+            detail::SinkImplBase<T>* a = this->pimpl.get();
+            detail::SinkImplBase<T>* b = other.pimpl.get();
+            
+            if (a == b)
+            {
+                return true;
+            }
+
+            if (!a)
+            {
+                std::swap(a, b);
+            }
+
+            // an "end" iterator is:
+            // - either the default constructed iterator (pimpl is nullptr)
+            // - or has reached the end of iteration (hasNext() returns false)
+            return !(b || a->hasNext());
+        }
+
+        bool operator != (iterator& other) { return !(*this == other); }
+    };
+
+    template <typename InputIterable>
+    Sink<typename detail::sink_traits<InputIterable>::value_type>
+    MakeSink(InputIterable& iterable)
+    {
+        return Sink<typename detail::sink_traits<InputIterable>::value_type>(iterable);
+    }
+
+    template <typename T>
+    Sink<T>
+    MakeSink(Pipe<T>& pipe)
+    {
+        return Sink<T>(pipe);
+    }
+
 
 }
 
