@@ -13,6 +13,7 @@
 #include <memory>
 #include <functional>
 #include <type_traits>
+#include <thread>
 
 #include <boost/optional.hpp>
 
@@ -387,11 +388,28 @@ namespace Plumbing
         bool operator != (iterator& other) { return !(*this == other); }
     };
 
+    // TODO: std::function doesn't bind well... hmmm
     template <typename Input, typename Output>
     Sink<Output> connect(Sink<Input>& input,
-                         std::function<Output(Input)> tranformation)
+                         std::function<Output(Input const&)> transformation)
     {
+        std::shared_ptr<Pipe<Output>> pipe(new Pipe<Output>(2)); // TODO make this customizable
 
+        // start processing thread
+        std::thread processingThread(
+                [pipe, &input]
+                ( std::function<Output(Input)> transformation )
+                {
+                    for (auto&& e : input) {
+                        pipe->enqueue(transformation(e));
+                    }
+                    pipe->close();
+                },
+                std::move(transformation)
+        );
+        processingThread.detach(); // TODO: shouldn't detach?
+
+        return MakeSink(*pipe);
     }
 
     template <typename InputIterable>

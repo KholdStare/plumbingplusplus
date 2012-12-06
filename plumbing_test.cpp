@@ -53,5 +53,21 @@ int main(int argc, char const *argv[])
     pipe.close();
     b.join();
 
+    // testing connect
+    std::cout << std::endl;
+    std::cout << "Connect test:" << std::endl;
+    auto stringSink = MakeSink(vals);
+    auto charSink = connect(stringSink,
+        std::function<char(std::string const&)>(
+        []( std::string const& s ) -> char
+        {
+            return s[0]; // return first character
+        }
+        )
+    );
+    for (auto&& c : charSink) {
+        std::cout << c << std::endl;
+    }
+
     return 0;
 }
