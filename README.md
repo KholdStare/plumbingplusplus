@@ -22,8 +22,8 @@ To process several images, the simple imperative approach is a for loop:
         saveImage(processImage(image));
     }
 
-It gets the job down but is single threaded and not concurrent. The bulk of the
-time the program will be blocked, waiting for IO to complete. Since it is single
+It gets the job done but is single threaded and not concurrent. Most of the time
+the program will be blocked, waiting for IO to complete. Since it is single
 threaded, parallelism cannot be exploited. Wouldn't it be nice if one image was
 being read, while another was being processed, while another was being saved?
 

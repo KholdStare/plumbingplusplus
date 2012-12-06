@@ -7,6 +7,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <cassert>
+#include <iterator>
 #include <boost/optional.hpp>
 
 // used if number of inputs/outputs is not one-to-one.
@@ -47,6 +48,86 @@ float convertToFloat(int in)
 
 namespace Plumbing
 {
+
+    namespace detail
+    {
+
+        template <typename InputIterable>
+        struct sink_traits
+        {
+            typedef InputIterable type;
+            typedef typename InputIterable::iterator iterator;
+            typedef typename std::iterator_traits<iterator>::value_type value_type;
+        };
+
+        template <typename T>
+        class SinkImplBase
+        {
+        public:
+            typedef T value_type;
+
+            virtual ~SinkImplBase () { }
+
+            virtual bool hasNext() = 0;
+            virtual T next() = 0;
+        
+        };
+
+        /**
+         * @note: InputIterable means has .begin() and .end()
+         * that return InputIterator
+         */
+        template <typename InputIterable>
+        class SinkImpl : public SinkImplBase<typename sink_traits<InputIterable>::value_type>
+        {
+            typedef SinkImpl<InputIterable> type;
+            typedef typename sink_traits<InputIterable>::iterator iterator;
+            typedef typename sink_traits<InputIterable>::value_type value_type;
+            iterator current_;
+            iterator end_;
+
+        public:
+
+            SinkImpl(InputIterable& iterable)
+                : current_(iterable.begin()),
+                  end_(iterable.end())
+            { }
+
+            ~SinkImpl() { }
+
+            bool hasNext()
+            {
+                return current_ != end_;
+            }
+
+            value_type next()
+            {
+                return *current_++;
+            }
+        };
+
+    }
+
+    template <typename T>
+    class Sink
+    {
+        typedef T value_type;
+        typedef Sink<T> iterator;
+
+        detail::SinkImplBase<T>* pimpl;
+
+    public:
+
+        template <typename InputIterable>
+        Sink(InputIterable& iterable)
+            : pimpl(new detail::SinkImpl<InputIterable>(iterable))
+        { }
+
+        Sink() : pimpl(nullptr) { }
+
+        // TODO implement iterator interface
+
+    };
 
     template <typename T>
     class Pipe

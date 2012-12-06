@@ -9,6 +9,15 @@ using namespace Plumbing;
 int main(int argc, char const *argv[])
 {
     std::vector<std::string> vals{"Hello", "Concurrent", "World", "Of"};
+
+    // testing sink implementation type erasure
+    auto sinkImpl = detail::SinkImpl<std::vector<std::string>>(vals);
+    detail::SinkImplBase<std::string>& sink = sinkImpl;
+    while (sink.hasNext())
+    {
+        std::cout << sink.next() << std::endl;
+    }
+
     //std::vector<int> vals{42, 7, 32, 6};
     Pipe<std::string> pipe(2);
     //Pipe<int> pipe;
