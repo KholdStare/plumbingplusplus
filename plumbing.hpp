@@ -389,6 +389,8 @@ namespace Plumbing
     };
 
     // TODO: std::function doesn't bind well... hmmm
+    // TODO: make connect a member function of sink
+    // TODO: create operator | for unix-like piping
     template <typename Input, typename Output>
     Sink<Output> connect(Sink<Input>& input,
                          std::function<Output(Input const&)> transformation)
