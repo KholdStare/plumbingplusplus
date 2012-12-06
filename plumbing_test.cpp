@@ -11,13 +11,24 @@ int main(int argc, char const *argv[])
     std::vector<std::string> vals{"Hello", "Concurrent", "World", "Of"};
 
     // testing sink implementation type erasure
+    std::cout << "SinkImpl type erasure:" << std::endl;
     auto sinkImpl = detail::SinkImpl<std::vector<std::string>>(vals);
-    detail::SinkImplBase<std::string>& sink = sinkImpl;
-    while (sink.hasNext())
+    detail::SinkImplBase<std::string>& sinkDetail = sinkImpl;
+    while (sinkDetail.hasNext())
     {
-        std::cout << sink.next() << std::endl;
+        std::cout << sinkDetail.next() << std::endl;
     }
 
+    // testing sink type erasure
+    std::cout << std::endl;
+    std::cout << "Sink type erasure:" << std::endl;
+    auto sink = MakeSink(vals);
+    for(auto&& e : sink)
+    {
+        std::cout << e << std::endl;
+    }
+
+    std::cout << std::endl;
     //std::vector<int> vals{42, 7, 32, 6};
     Pipe<std::string> pipe(2);
     //Pipe<int> pipe;
