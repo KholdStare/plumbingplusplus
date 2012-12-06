@@ -135,8 +135,6 @@ namespace Plumbing
          *  Facilities for writing to pipe  *
          ************************************/
         
-        // TODO: iterator dereference returns proxy object,
-        // whose assigment operator calls enqueue directly
         void enqueue(T const& e)
         {
             std::unique_lock<std::mutex> lock(mutex_);
@@ -195,8 +193,6 @@ namespace Plumbing
             return open_;
         }
 
-        // TODO: increment operation does nothing.
-        // dereference directly calls dequeue
         T dequeue()
         {
             std::unique_lock<std::mutex> lock(mutex_);
@@ -393,14 +389,6 @@ namespace Plumbing
     {
         return Sink<typename detail::sink_traits<InputIterable>::value_type>(iterable);
     }
-
-    template <typename T>
-    Sink<T>
-    MakeSink(Pipe<T>& pipe)
-    {
-        return Sink<T>(pipe);
-    }
-
 
 }
 
