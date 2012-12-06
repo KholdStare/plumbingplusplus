@@ -11,10 +11,10 @@
 
 #include <iterator>
 #include <memory>
+#include <functional>
+#include <type_traits>
 
 #include <boost/optional.hpp>
-#include <boost/utility/enable_if.hpp>
-#include <boost/type_traits/is_same.hpp>
 
 // used if number of inputs/outputs is not one-to-one.
 // e.g. 3 images in, 1 image out (hdr)
@@ -331,13 +331,17 @@ namespace Plumbing
          * Main constructor that uses type erasure to encapsulate an iterable
          * object, with a single type of iterator.
          *
-         * @note use boost::disable_if and SFINAE to disable the constructor
+         * @note use std::enable_if and SFINAE to disable the constructor
          * for itself, otherwise this constructor gets interpreted as the copy
          * constructor, and we get into an infinite loop of creating a new Sink
          * from itself.
          */
-        template <typename InputIterable,
-                  typename boost::disable_if< boost::is_same<InputIterable, Sink<T>>, int>::type = 0>
+        template <
+            typename InputIterable,
+            typename std::enable_if<
+                !std::is_same<InputIterable, Sink<T>>::value, int
+            >::type = 0
+        >
         Sink(InputIterable& iterable)
             : pimpl(new detail::SinkImpl<InputIterable>(iterable))
         { }
@@ -382,6 +386,13 @@ namespace Plumbing
 
         bool operator != (iterator& other) { return !(*this == other); }
     };
+
+    template <typename Input, typename Output>
+    Sink<Output> connect(Sink<Input>& input,
+                         std::function<Output(Input)> tranformation)
+    {
+
+    }
 
     template <typename InputIterable>
     Sink<typename detail::sink_traits<InputIterable>::value_type>
