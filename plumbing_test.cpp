@@ -6,6 +6,11 @@
 
 using namespace Plumbing;
 
+void printLine(char c)
+{
+    std::cout << c << std::endl;
+}
+
 int main(int argc, char const *argv[])
 {
     std::vector<std::string> vals{"Hello", "Concurrent", "World", "Of"};
@@ -57,17 +62,14 @@ int main(int argc, char const *argv[])
     std::cout << std::endl;
     std::cout << "Connect test:" << std::endl;
     auto stringSink = MakeSink(vals);
-    auto charSink = connect(stringSink,
-        std::function<char(std::string const&)>(
-        []( std::string const& s ) -> char
+    auto getFirstChar = 
+        []( std::string const& s )
         {
-            return s[0]; // return first character
-        }
-        )
-    );
-    for (auto&& c : charSink) {
-        std::cout << c << std::endl;
-    }
+            printLine(s[0]); // print first character
+        };
+
+    //( stringSink | getFirstChar ) | printLine;
+    ( stringSink |  getFirstChar ).wait();
 
     return 0;
 }

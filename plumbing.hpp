@@ -14,6 +14,7 @@
 #include <functional>
 #include <type_traits>
 #include <thread>
+#include <future>
 
 #include <boost/optional.hpp>
 
@@ -388,30 +389,93 @@ namespace Plumbing
         bool operator != (iterator& other) { return !(*this == other); }
     };
 
+    namespace detail
+    {
+
+        // creating a struct to specialize template
+        template <typename Output, typename Func>
+        struct connectImpl
+        {
+
+            template <typename InputIterable>
+            static Sink<Output> connect(InputIterable&& input, Func func)
+            {
+                std::shared_ptr<Pipe<Output>> pipe(new Pipe<Output>(2)); // TODO make this customizable
+
+                // start processing thread
+                std::thread processingThread(
+                        [pipe, &input, func]()
+                        {
+                            for (auto&& e : input) {
+                                pipe->enqueue(func(e));
+                            }
+                            pipe->close();
+                        }
+                        );
+
+                processingThread.detach(); // TODO: shouldn't detach?
+
+                return MakeSink(*pipe);
+            }
+        };
+
+        template <typename Func>
+        struct connectImpl<void, Func>
+        {
+
+            /**
+             * Specialization for functions returning void.
+             *
+             * TODO: have to return an object ( a future? ) that allows
+             * us to wait for the computation.
+             */
+            template <typename InputIterable>
+            static std::future<void> connect(InputIterable&& input, Func func)
+            {
+                // start processing thread
+                return std::async(std::launch::async,
+                        [&input, func]()
+                        {
+                            for (auto&& e : input) {
+                                func(e);
+                            }
+                        }
+                );
+            }
+        };
+
+    }
+
     // TODO: std::function doesn't bind well... hmmm
     // TODO: make connect a member function of sink
     // TODO: create operator | for unix-like piping
-    template <typename Input, typename Output>
-    Sink<Output> connect(Sink<Input>& input,
-                         std::function<Output(Input const&)> transformation)
+    /**
+     * @note need to specialize based on output of the function passed in,
+     * so need another layer of indirection to connectImpl.
+     */
+    template <typename InputIterable, typename Func>
+    auto connect(InputIterable& input, Func func)
+    -> decltype(
+            detail::connectImpl<
+                decltype(func(std::declval<typename std::remove_reference<InputIterable>::type::iterator::value_type>())),
+                Func
+            >::connect(input, func)
+       )
     {
-        std::shared_ptr<Pipe<Output>> pipe(new Pipe<Output>(2)); // TODO make this customizable
+        typedef decltype(
+                    func(
+                        std::declval<typename std::remove_reference<InputIterable>::type::iterator::value_type>()
+                    )
+                ) Output;
 
-        // start processing thread
-        std::thread processingThread(
-                [pipe, &input]
-                ( std::function<Output(Input)> transformation )
-                {
-                    for (auto&& e : input) {
-                        pipe->enqueue(transformation(e));
-                    }
-                    pipe->close();
-                },
-                std::move(transformation)
-        );
-        processingThread.detach(); // TODO: shouldn't detach?
+        return detail::connectImpl<Output, Func>::connect(input, func);
+    }
 
-        return MakeSink(*pipe);
+    template <typename InputIterable, typename Func>
+    inline auto operator | (InputIterable&& input, Func func)
+    -> decltype(connect(input, func))
+    {
+        return connect(input, func);
     }
 
     template <typename InputIterable>

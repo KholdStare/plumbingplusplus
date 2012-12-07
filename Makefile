@@ -3,7 +3,7 @@ PROJ=plumbing_test
 CC=g++-4.7
 
 DEBUGFLAGS= -g -DDEBUG
-CFLAGS= -Wall -Werror -DUNIX -std=c++11 $(DEBUGFLAGS)
+CFLAGS= -Wall -Werror -DUNIX -std=c++0x $(DEBUGFLAGS)
 
 LIBS= -lpthread
  
