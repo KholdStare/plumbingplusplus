@@ -36,7 +36,7 @@ and joins each with a concurrent FIFO:
     (paths >> loadImage >> processImage >> saveImage).wait();
 
 Done! Each connection takes an iterable object, and returns the end of a
-concurrent FIFO called a <pre>Sink</pre>:
+concurrent FIFO called a Sink:
 
     Plumbing::Sink<Image<RGB>> imageSink = (paths >> loadImage)
 
@@ -50,7 +50,7 @@ These can be freely iterated over, or used in stl algorithms:
         std::cout << elem << std::endl;
     }
 
-Each <pre>Sink</pre> (being iterable) thus becomes the input to the next
+Each Sink (being iterable) thus becomes the input to the next
 connection. If the last function in the pipeline returns void, the connect call
 returns a future, so the caller can wait for the whole computation to complete:
 
@@ -66,10 +66,12 @@ Currently, several improvements can be made to the implementation regarding move
 semantics, to save expensive copies.  It should be possible to move objects all
 the way through the pipeline.
 
-A concern with the API is the use of operator overloading. The <pre>operator
->></pre> template function may accept too broad a range of inputs, and also
-leaks into the global namespace. The operator delegates to a regular function,
-but composing with this function is awkward:
+A concern with the API is the use of operator overloading. The operator &gt;&gt;
+template function may accept too broad a range of inputs, and also leaks into
+the global namespace. Not cool.
+
+The operator &gt;&gt; delegates to a regular function, but composing with this
+function is awkward:
 
     Plumbing::connect(
         Plumbing::connect(
