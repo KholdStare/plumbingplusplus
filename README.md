@@ -33,13 +33,12 @@ and joins each with a concurrent FIFO:
     
     std::vector<std:string> paths{"tree.jpg", "mountain.jpg", "car.jpg"};
 
-    Plumbing::Source(paths).connect(loadImage)
-                           .connect(processImage)
-                           .connect(saveImage)
+    (paths >> loadImage >> processImage >> saveImage).wait();
 
-Done! Each connect call returns the end of a concurrent FIFO called a Sink:
+Done! Each connection takes an iterable object, and returns the end of a
+concurrent FIFO called a <pre>Sink</pre>:
 
-    Plumbing::Sink<Image<RGB>> imageSink = Plumbing::Source(paths).connect(loadImage)
+    Plumbing::Sink<Image<RGB>> imageSink = (paths >> loadImage)
 
 These can be freely iterated over, or used in stl algorithms:
 
@@ -51,17 +50,37 @@ These can be freely iterated over, or used in stl algorithms:
         std::cout << elem << std::endl;
     }
 
-Alternate ways of connecting the functions could be implemented:
+Each <pre>Sink</pre> (being iterable) thus becomes the input to the next
+connection. If the last function in the pipeline returns void, the connect call
+returns a future, so the caller can wait for the whole computation to complete:
 
-    // "Unix" way
-    Plumbing::Source(paths) | loadImage | processImage | saveImage;
-
-    // "Almost like something similar to Haskell" way
-    Plumbing::Source(paths) >> loadImage >> processImage >> saveImage;
+    std::future<void> future = (paths >> loadImage >> processImage >> saveImage);
+    future.wait();
 
 ### Progress
 
-This project is in its very early stages, so only a simple (not yet fully
-functional) concurrent FIFO is implemented. The intent is to make it gel well
-with move semantics and C++11 for efficient passing of objects, as well as
-properly closing/migrating pipes accross threads (migrating could be difficult).
+The above features are currently implemented, but I am seeking constructive
+criticism on the API and implementation.
+
+Currently, several improvements can be made to the implementation regarding move
+semantics, to save expensive copies.  It should be possible to move objects all
+the way through the pipeline.
+
+A concern with the API is the use of operator overloading. The <pre>operator
+>></pre> template function may accept too broad a range of inputs, and also
+leaks into the global namespace. The operator delegates to a regular function,
+but composing with this function is awkward:
+
+    Plumbing::connect(
+        Plumbing::connect(
+            Plumbing::connect(paths, loadImage),
+            processImage
+        ),
+        saveImage
+    );
+
+An alternative can be a variadic template that takes a sequence of functions:
+
+    Plumbing::connect(paths, loadImage, processImage, saveImage);
+
+This seems like a good approach.
