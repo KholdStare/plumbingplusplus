@@ -6,11 +6,6 @@
 
 using namespace Plumbing;
 
-void printLine(char c)
-{
-    std::cout << c << std::endl;
-}
-
 int main(int argc, char const *argv[])
 {
     std::vector<std::string> vals{"Hello", "Concurrent", "World", "Of"};
@@ -33,10 +28,9 @@ int main(int argc, char const *argv[])
         std::cout << e << std::endl;
     }
 
+    // testing pipe usage
     std::cout << std::endl;
-    //std::vector<int> vals{42, 7, 32, 6};
     Pipe<std::string> pipe(2);
-    //Pipe<int> pipe;
     std::thread a([&](){
             for (auto& e : vals) {
                 pipe.enqueue(e);
@@ -53,7 +47,6 @@ int main(int argc, char const *argv[])
     a.join();
 
     pipe.enqueue("Awesomeness");
-    //pipe.enqueue(666);
 
     pipe.close();
     b.join();
@@ -61,15 +54,19 @@ int main(int argc, char const *argv[])
     // testing connect
     std::cout << std::endl;
     std::cout << "Connect test:" << std::endl;
-    auto stringSink = MakeSink(vals);
     auto getFirstChar = 
         []( std::string const& s )
         {
-            printLine(s[0]); // print first character
+            return s[0]; // print first character
         };
 
-    //( stringSink | getFirstChar ) | printLine;
-    ( stringSink |  getFirstChar ).wait();
+    auto printLine =
+        [](char c)
+        {
+            std::cout << c << std::endl;
+        };
+
+    ( vals >> getFirstChar >> printLine ).wait();
 
     return 0;
 }

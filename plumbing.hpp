@@ -16,6 +16,8 @@
 #include <thread>
 #include <future>
 
+#include <utility> // std::forward
+
 #include <boost/optional.hpp>
 
 // used if number of inputs/outputs is not one-to-one.
@@ -393,11 +395,11 @@ namespace Plumbing
     {
 
         // creating a struct to specialize template
-        template <typename Output, typename Func>
+        template <typename Output>
         struct connectImpl
         {
 
-            template <typename InputIterable>
+            template <typename InputIterable, typename Func>
             static Sink<Output> connect(InputIterable&& input, Func func)
             {
                 std::shared_ptr<Pipe<Output>> pipe(new Pipe<Output>(2)); // TODO make this customizable
@@ -419,8 +421,8 @@ namespace Plumbing
             }
         };
 
-        template <typename Func>
-        struct connectImpl<void, Func>
+        template <>
+        struct connectImpl<void>
         {
 
             /**
@@ -429,7 +431,7 @@ namespace Plumbing
              * TODO: have to return an object ( a future? ) that allows
              * us to wait for the computation.
              */
-            template <typename InputIterable>
+            template <typename InputIterable, typename Func>
             static std::future<void> connect(InputIterable&& input, Func func)
             {
                 // start processing thread
@@ -446,20 +448,17 @@ namespace Plumbing
 
     }
 
-    // TODO: std::function doesn't bind well... hmmm
     // TODO: make connect a member function of sink
-    // TODO: create operator | for unix-like piping
     /**
      * @note need to specialize based on output of the function passed in,
      * so need another layer of indirection to connectImpl.
      */
     template <typename InputIterable, typename Func>
-    auto connect(InputIterable& input, Func func)
+    auto connect(InputIterable&& input, Func func)
     -> decltype(
             detail::connectImpl<
-                decltype(func(std::declval<typename std::remove_reference<InputIterable>::type::iterator::value_type>())),
-                Func
-            >::connect(input, func)
+                decltype(func(std::declval<typename std::remove_reference<InputIterable>::type::iterator::value_type>()))
+            >::connect(std::forward<InputIterable>(input), func)
        )
     {
         typedef decltype(
@@ -468,14 +467,14 @@ namespace Plumbing
                     )
                 ) Output;
 
-        return detail::connectImpl<Output, Func>::connect(input, func);
+        return detail::connectImpl<Output>::connect(std::forward<InputIterable>(input), func);
     }
 
     template <typename InputIterable, typename Func>
-    inline auto operator | (InputIterable&& input, Func func)
-    -> decltype(connect(input, func))
+    inline auto operator >> (InputIterable&& input, Func func)
+    -> decltype(connect(std::forward<InputIterable>(input), func))
     {
-        return connect(input, func);
+        return connect(std::forward<InputIterable>(input), func);
     }
 
     template <typename InputIterable>
