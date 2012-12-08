@@ -19,6 +19,7 @@
 #include <utility> // std::forward
 
 #include <boost/optional.hpp>
+#include <boost/none.hpp>
 
 // used if number of inputs/outputs is not one-to-one.
 // e.g. 3 images in, 1 image out (hdr)
@@ -66,7 +67,7 @@ namespace Plumbing
         // TODO: perhaps create a different queue which is "infinite" (a linked list),
         //       but provides a way to "stall" it on a predicate (e.g. memory usage)
 
-        std::vector<T> fifo_;
+        std::vector<boost::optional<T>> fifo_;
         int write_;
         int read_;
         std::mutex mutex_;
@@ -79,7 +80,19 @@ namespace Plumbing
          */
         inline int writeHeadroom()
         {
-            return fifo_.size() - ( (write_ - read_) % fifo_.size() ) - 1;
+            return (write_ < read_
+                   ? read_ - write_
+                   : (read_ + fifo_.size()) - write_) - 1;
+        }
+
+        /**
+         * Return the number of free slots available for reading
+         */
+        inline int readHeadroom()
+        {
+            return read_ <= write_
+                   ? write_ - read_
+                   : (write_ + fifo_.size()) - read_;
         }
 
         inline void incrementWrite()
@@ -92,13 +105,6 @@ namespace Plumbing
             read_ = (read_ + 1) % fifo_.size();
         }
 
-        /**
-         * Return the number of free slots available for reading
-         */
-        inline int readHeadroom()
-        {
-            return (write_ - read_) % fifo_.size();
-        }
 
     public:
         Pipe(std::size_t fifoSize = 2)
@@ -153,23 +159,8 @@ namespace Plumbing
             readyForRead_.notify_one();
         }
 
-        template <class... Args>
-        void emplace(Args&&... args)
-        {
-            std::unique_lock<std::mutex> lock(mutex_);
-            while(!writeHeadroom())
-            {
-                readyForWrite_.wait(lock);
-            }
-
-            fifo_.emplace(fifo_.cbegin() + write_, std::forward<Args>(args)...);
-            incrementWrite();
-
-            readyForRead_.notify_one();
-        }
-
-        // TODO: close currently closes the pipe immediately, even if the read side
-        // has not read all the remaining items. Have to enqueue "close value"
+        // TODO: have to look out for trying to enque after closing the pipe is closed
+        // perhaps throw exception?
         void close()
         {
             std::unique_lock<std::mutex> lock(mutex_);
@@ -178,7 +169,9 @@ namespace Plumbing
                 readyForWrite_.wait(lock);
             }
 
-            open_ = false;
+            fifo_[write_] = boost::optional<T>(boost::none);
+            incrementWrite();
+
             readyForRead_.notify_one();
         }
 
@@ -189,12 +182,12 @@ namespace Plumbing
         bool isOpen()
         {
             std::unique_lock<std::mutex> lock(mutex_);
-            while(!readHeadroom() && open_)
+            while(!readHeadroom())
             {
                 readyForRead_.wait(lock);
             }
 
-            return open_;
+            return fifo_[read_];
         }
 
         T dequeue()
@@ -205,7 +198,8 @@ namespace Plumbing
                 readyForRead_.wait(lock);
             }
 
-            T const& e = std::move(fifo_[read_]);
+            // TODO std::move
+            T const& e = *fifo_[read_];
             incrementRead();
 
             readyForWrite_.notify_one();
@@ -214,111 +208,10 @@ namespace Plumbing
         }
     };
 
-    namespace detail
-    {
-
-        template <typename InputIterable>
-        struct sink_traits
-        {
-            typedef InputIterable type;
-            typedef typename InputIterable::iterator iterator;
-            typedef typename std::iterator_traits<iterator>::value_type value_type;
-        };
-
-        template <typename T>
-        class SinkImplBase
-        {
-        public:
-            typedef T value_type;
-
-            virtual ~SinkImplBase () { }
-
-            virtual bool hasNext() = 0;
-            virtual T next() = 0;
-        
-        };
-
-        /**
-         * @note: InputIterable means has .begin() and .end()
-         * that return InputIterator
-         */
-        template <typename InputIterable>
-        class SinkImpl : public SinkImplBase<typename sink_traits<InputIterable>::value_type>
-        {
-            typedef SinkImpl<InputIterable> type;
-            typedef typename sink_traits<InputIterable>::iterator iterator;
-            typedef typename sink_traits<InputIterable>::value_type value_type;
-            iterator current_;
-            iterator end_;
-
-        public:
-
-            SinkImpl(InputIterable& iterable)
-                : current_(iterable.begin()),
-                  end_(iterable.end())
-            { }
-
-            ~SinkImpl() { }
-
-            bool hasNext()
-            {
-                return current_ != end_;
-            }
-
-            value_type next()
-            {
-                return *current_++;
-            }
-        };
-
-        /**
-         * Template specialization of sink_traits for Pipes
-         */
-        template <>
-        template <typename T>
-        struct sink_traits<Pipe<T>>
-        {
-            typedef Pipe<T> type;
-            typedef void iterator;
-            typedef T value_type;
-        };
-
-        /**
-         * Template specialization for Pipes
-         */
-        template <>
-        template <typename T>
-        class SinkImpl<Pipe<T>> : public SinkImplBase<T>
-        {
-            typedef Pipe<T> pipe_type;
-            typedef SinkImpl<pipe_type> type;
-            typedef T value_type;
-            Pipe<T>& pipe_;
-
-        public:
-
-            SinkImpl(Pipe<T>& pipe)
-                : pipe_(pipe)
-            { }
-
-            ~SinkImpl() { }
-
-            bool hasNext()
-            {
-                return pipe_.isOpen();
-            }
-
-            value_type next()
-            {
-                return pipe_.dequeue();
-            }
-        };
-    }
-
     template <typename T>
     class Sink
     {
-        std::shared_ptr<detail::SinkImplBase<T>> pimpl;
+        std::shared_ptr<Pipe<T>> pipe_;
 
     public:
         typedef T value_type;
@@ -331,29 +224,14 @@ namespace Plumbing
         Sink(Sink<T> const& other) = default;
         Sink(Sink<T>&& other) = default;
 
-        /**
-         * Main constructor that uses type erasure to encapsulate an iterable
-         * object, with a single type of iterator.
-         *
-         * @note use std::enable_if and SFINAE to disable the constructor
-         * for itself, otherwise this constructor gets interpreted as the copy
-         * constructor, and we get into an infinite loop of creating a new Sink
-         * from itself.
-         */
-        template <
-            typename InputIterable,
-            typename std::enable_if<
-                !std::is_same<InputIterable, Sink<T>>::value, int
-            >::type = 0
-        >
-        Sink(InputIterable& iterable)
-            : pimpl(new detail::SinkImpl<InputIterable>(iterable))
+        Sink(std::shared_ptr<Pipe<T>> const& pipe)
+            : pipe_(pipe)
         { }
 
         /**
          * Default constructor, creates an "end" iterator
          */
-        Sink() : pimpl(nullptr) { }
+        Sink() : pipe_(nullptr) { }
 
         iterator& begin() { return *this; }
         iterator  end()   { return iterator(); }
@@ -365,12 +243,12 @@ namespace Plumbing
          * To fullfil the input_iterator category, both returns the 
          * the next element and advances the inner iterator
          */
-        value_type operator * ()    { return pimpl->next(); }
+        value_type operator * ()    { return pipe_->dequeue(); }
 
         bool operator == (iterator& other)
         {
-            detail::SinkImplBase<T>* a = this->pimpl.get();
-            detail::SinkImplBase<T>* b = other.pimpl.get();
+            Pipe<T>* a = this->pipe_.get();
+            Pipe<T>* b = other.pipe_.get();
             
             if (a == b)
             {
@@ -383,9 +261,9 @@ namespace Plumbing
             }
 
             // an "end" iterator is:
-            // - either the default constructed iterator (pimpl is nullptr)
-            // - or has reached the end of iteration (hasNext() returns false)
-            return !(b || a->hasNext());
+            // - either the default constructed iterator (pipe_ is nullptr)
+            // - or has reached the end of iteration (isOpen() returns false)
+            return !(b || a->isOpen());
         }
 
         bool operator != (iterator& other) { return !(*this == other); }
@@ -417,7 +295,7 @@ namespace Plumbing
 
                 processingThread.detach(); // TODO: shouldn't detach?
 
-                return MakeSink(*pipe);
+                return Sink<Output>(pipe);
             }
         };
 
@@ -470,18 +348,16 @@ namespace Plumbing
         return detail::connectImpl<Output>::connect(std::forward<InputIterable>(input), func);
     }
 
+    /**
+     * @note: Perhaps this operator is too generically templated, and would "poison"
+     * the code it is imported into? Using a connect function doesn't seem as
+     * "slick"
+     */
     template <typename InputIterable, typename Func>
     inline auto operator >> (InputIterable&& input, Func func)
     -> decltype(connect(std::forward<InputIterable>(input), func))
     {
         return connect(std::forward<InputIterable>(input), func);
-    }
-
-    template <typename InputIterable>
-    Sink<typename detail::sink_traits<InputIterable>::value_type>
-    MakeSink(InputIterable& iterable)
-    {
-        return Sink<typename detail::sink_traits<InputIterable>::value_type>(iterable);
     }
 
 }
