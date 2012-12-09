@@ -246,32 +246,42 @@ namespace Plumbing
         /**
          * A helper "hack" to get around lambdas lacking a "capture by move".
          */
-        template <typename T> struct mover;
+        template <typename T> struct forwarder;
 
         /**
          * Specialization for rvalue references. Essentially makes the 
          * copy constructor behave like a move.
          */
         template <typename T>
-        struct mover<T&&>
+        struct forwarder<T&&>
         {
             T val;
 
-            mover(T&& obj) : val(obj) { }
+            forwarder(T&& obj) : val(obj) { }
 
-            mover(mover<T&&>& other) : val(std::move(other)) { }
+            forwarder(forwarder<T&&>const & other) :  val(std::move(other.val)) { }
+            forwarder(forwarder<T&&>&& other) : val(std::move(other.val)) { }
 
         };
 
         template <typename T>
-        struct mover<T&>
+        struct forwarder<T&>
         {
             T& val;
 
-            mover(T& obj) : val(obj) { }
+            forwarder(T& obj) : val(obj) { }
 
-            mover(mover<T&>& other) : val(other) { }
+            forwarder(forwarder<T&>const & other) :  val(other.val) { }
+            forwarder(forwarder<T&>&& other) : val(other.val) { }
         };
+
+        template <typename T>
+        inline auto make_forwarder(T&& obj)
+        -> forwarder<decltype(std::forward<T>(obj))>
+        {
+            typedef decltype(std::forward<T>(obj)) forwarded_type;
+            return detail::forwarder<forwarded_type>(std::forward<T>(obj));
+        }
 
         //========================================================
 
@@ -325,7 +335,6 @@ namespace Plumbing
 
         //========================================================
 
-        // creating a struct to specialize template
         template <typename Output>
         struct connect_impl
         {
@@ -362,14 +371,17 @@ namespace Plumbing
             template <typename InputIterable, typename Func>
             static std::future<void> connect(InputIterable&& input, Func func)
             {
+                auto inputForwarder = make_forwarder(std::forward<InputIterable>(input));
+
                 // start processing thread
                 return std::async(std::launch::async,
-                        [&input, func]()
+                        [func](decltype(inputForwarder) inputForwarder)
                         {
-                            for (auto&& e : input) {
+                            for (auto&& e : inputForwarder.val) {
                                 func(e);
                             }
-                        }
+                        },
+                        inputForwarder
                 );
             }
         };

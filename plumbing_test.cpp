@@ -72,6 +72,12 @@ int main(int argc, char const *argv[])
     b.join();
 
     //testSplitting();
+    
+    // testforwarder;
+    std::string s("Testing forwarder");
+    detail::forwarder<std::string&&> m(std::move(s));
+    detail::forwarder<std::string&&> m2(m);
+    std::cout << m2.val << std::endl;
 
     // testing connect
     std::cout << std::endl;
