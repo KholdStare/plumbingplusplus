@@ -6,6 +6,38 @@
 
 using namespace Plumbing;
 
+void testSplitting()
+{
+    std::vector<int> vals{1,2,3,4,5,6,7,8,9,10};
+    // testing pipe usage
+    std::cout << std::endl;
+    Pipe<int> pipe(4);
+
+    // both threads are reading from the same pipe
+    std::thread a([&](){ 
+            while (pipe.isOpen())
+            {
+                std::cout << "Thread A: " << pipe.dequeue() << std::endl;
+            }
+            });
+
+    std::thread b([&](){ 
+            while (pipe.isOpen())
+            {
+                std::cout << "Thread B: " << pipe.dequeue() << std::endl;
+            }
+            });
+
+    for (auto& e : vals) {
+        pipe.enqueue(e);
+    }
+
+    pipe.close();
+
+    a.join();
+    b.join();
+}
+
 int main(int argc, char const *argv[])
 {
     std::vector<std::string> vals{"Hello", "Concurrent", "World", "Of"};
@@ -32,6 +64,8 @@ int main(int argc, char const *argv[])
 
     pipe.close();
     b.join();
+
+    testSplitting();
 
     // testing connect
     std::cout << std::endl;

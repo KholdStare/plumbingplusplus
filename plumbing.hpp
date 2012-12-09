@@ -159,7 +159,7 @@ namespace Plumbing
             readyForRead_.notify_one();
         }
 
-        // TODO: have to look out for trying to enque after closing the pipe is closed
+        // TODO: have to look out for trying to enqueue after closing the pipe
         // perhaps throw exception?
         void close()
         {
@@ -172,7 +172,7 @@ namespace Plumbing
             fifo_[write_] = boost::optional<T>(boost::none);
             incrementWrite();
 
-            readyForRead_.notify_one();
+            readyForRead_.notify_all();
         }
 
         /**************************************
@@ -190,6 +190,11 @@ namespace Plumbing
             return fifo_[read_];
         }
 
+        // TODO boost::optional should be return type so that the
+        // check for open and getting the value is an atomic operation.
+        // Currently if two threads try reading from a pipe, both can pass
+        // the isOpen() check, one reads an actual value, while the other
+        // might try to read when the pipe is already closed.
         T dequeue()
         {
             std::unique_lock<std::mutex> lock(mutex_);
@@ -271,6 +276,54 @@ namespace Plumbing
 
     namespace detail
     {
+        /**
+         * A traits struct to figure out the final return type of a pipeline
+         * of functions, given a starting type T and one or more callable types.
+         *
+         * Essentially carries out a fold, applying the functions in order on T,
+         * to obtain the final type
+         */
+        template <typename T, typename... Funcs>
+        struct connectTraits;
+
+        /**
+         * The base case of a single type.
+         */
+        template <typename T>
+        struct connectTraits<T>
+        {
+            typedef T return_type;
+            typedef Sink<return_type> monadic_type;
+        };
+
+        /**
+         * Specialization for void return: a future.
+         */
+        template <>
+        struct connectTraits<void>
+        {
+            typedef void return_type;
+            typedef std::future<void> monadic_type;
+        };
+        
+        /**
+         * The recursive case, where the first return_type is figured out, and
+         * passed along.
+         */
+        template <typename T, typename Func, typename... Funcs>
+        struct connectTraits<T, Func, Funcs...>
+        {
+        private:
+            // figure out the return type of the function
+            typedef decltype( std::declval<Func>()( std::declval<T>() )) T2;
+
+            // fold
+            typedef connectTraits<T2, Funcs...> helper_type;
+        public:
+            typedef typename helper_type::return_type return_type;
+            typedef typename helper_type::monadic_type monadic_type;
+        };
+
 
         // creating a struct to specialize template
         template <typename Output>
@@ -305,9 +358,6 @@ namespace Plumbing
 
             /**
              * Specialization for functions returning void.
-             *
-             * TODO: have to return an object ( a future? ) that allows
-             * us to wait for the computation.
              */
             template <typename InputIterable, typename Func>
             static std::future<void> connect(InputIterable&& input, Func func)
@@ -326,6 +376,9 @@ namespace Plumbing
 
     }
 
+    //template <typename InputIterable, typename Func, typename... Funcs>
+    //auto connect(InputIterable&& input, Func func)
+
     // TODO: make connect a member function of sink
     /**
      * @note need to specialize based on output of the function passed in,
@@ -333,20 +386,35 @@ namespace Plumbing
      */
     template <typename InputIterable, typename Func>
     auto connect(InputIterable&& input, Func func)
-    -> decltype(
-            detail::connectImpl<
-                decltype(func(std::declval<typename std::remove_reference<InputIterable>::type::iterator::value_type>()))
-            >::connect(std::forward<InputIterable>(input), func)
-       )
+    ->  typename detail::connectTraits<
+                typename std::remove_reference<InputIterable>::type::iterator::value_type,
+                Func
+        >::monadic_type
     {
-        typedef decltype(
-                    func(
-                        std::declval<typename std::remove_reference<InputIterable>::type::iterator::value_type>()
-                    )
-                ) Output;
+        typedef typename detail::connectTraits<
+                    typename std::remove_reference<InputIterable>::type::iterator::value_type,
+                    Func
+                >::return_type return_type;
 
-        return detail::connectImpl<Output>::connect(std::forward<InputIterable>(input), func);
+        return detail::connectImpl<return_type>::connect(std::forward<InputIterable>(input), func);
     }
+
+    //template <typename InputIterable, typename Func>
+    //auto connect(InputIterable&& input, Func func)
+    //-> decltype(
+            //detail::connectImpl<
+                //decltype(func(std::declval<typename std::remove_reference<InputIterable>::type::iterator::value_type>()))
+            //>::connect(std::forward<InputIterable>(input), func)
+       //)
+    //{
+        //typedef decltype(
+                    //func(
+                        //std::declval<typename std::remove_reference<InputIterable>::type::iterator::value_type>()
+                    //)
+                //) Output;
+
+        //return detail::connectImpl<Output>::connect(std::forward<InputIterable>(input), func);
+    //}
 
     /**
      * @note: Perhaps this operator is too generically templated, and would "poison"
@@ -359,6 +427,11 @@ namespace Plumbing
     {
         return connect(std::forward<InputIterable>(input), func);
     }
+
+    // TODO: create "bind" that aggregates functions right to left, producing a
+    // pipeline. When the pipeline is bound to an iterable, all threads etc.
+    // are instantiated as necessary
+    // Haskell's >>= ?
 
 }
 
