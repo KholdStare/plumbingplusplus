@@ -6,6 +6,12 @@
 
 using namespace Plumbing;
 
+template <typename T>
+void printLine(T elem)
+{
+    std::cout << elem << std::endl;
+};
+
 void testSplitting()
 {
     std::vector<int> vals{1,2,3,4,5,6,7,8,9,10};
@@ -65,7 +71,7 @@ int main(int argc, char const *argv[])
     pipe.close();
     b.join();
 
-    testSplitting();
+    //testSplitting();
 
     // testing connect
     std::cout << std::endl;
@@ -76,13 +82,16 @@ int main(int argc, char const *argv[])
             return s[0]; // print first character
         };
 
-    auto printLine =
-        [](char c)
-        {
-            std::cout << c << std::endl;
-        };
+    //auto printLine =
+        //[](char c)
+        //{
+            //std::cout << c << std::endl;
+        //};
 
-    ( vals >> getFirstChar >> printLine ).wait();
+    //( vals >> getFirstChar >> printLine ).wait();
+    connect( vals, getFirstChar, printLine<char> ).wait();
+    //connect( vals, getFirstChar);
+    connect( vals, printLine<std::string>).wait();
 
     return 0;
 }

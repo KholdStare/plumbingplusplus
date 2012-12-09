@@ -21,42 +21,6 @@
 #include <boost/optional.hpp>
 #include <boost/none.hpp>
 
-// used if number of inputs/outputs is not one-to-one.
-// e.g. 3 images in, 1 image out (hdr)
-// e.g. take two numbers and sum
-/*
-template <typename InIter, typename OutIter>
-void iteratorTransformation(InIter first, InIter last, OutIter out);
-*/
-
-// perhaps restrict on postcrement?
-/*
-void sumTwo(int* first, int* last, int* out)
-{
-    while( first != last )
-    {
-        *out = *first++;
-        *out += *first++;
-        
-        ++out;
-    }
-}
-*/
-
-// used when transformation creates a signle output from a single output.
-/*
-template <typename InType, typename OutType>
-OutType tranformation(InType const& in);
-*/
-
-// is a transformation
-/*
-float convertToFloat(int in)
-{
-    return static_cast<float>(in);
-}
-*/
-
 namespace Plumbing
 {
     template <typename T>
@@ -227,7 +191,9 @@ namespace Plumbing
         typedef void difference_type; // TODO: is this ok?
 
         Sink(Sink<T> const& other) = default;
-        Sink(Sink<T>&& other) = default;
+        Sink(Sink<T>&& other)
+            : pipe_(other.pipe_)
+        { } // TODO: look into shared_ptr move
 
         Sink(std::shared_ptr<Pipe<T>> const& pipe)
             : pipe_(pipe)
@@ -245,7 +211,7 @@ namespace Plumbing
         iterator& operator ++ (int) { return *this; } ///< noop
 
         /**
-         * To fullfil the input_iterator category, both returns the 
+         * To fulfill the input_iterator category, both returns the 
          * the next element and advances the inner iterator
          */
         value_type operator * ()    { return pipe_->dequeue(); }
@@ -276,6 +242,39 @@ namespace Plumbing
 
     namespace detail
     {
+
+        /**
+         * A helper "hack" to get around lambdas lacking a "capture by move".
+         */
+        template <typename T> struct mover;
+
+        /**
+         * Specialization for rvalue references. Essentially makes the 
+         * copy constructor behave like a move.
+         */
+        template <typename T>
+        struct mover<T&&>
+        {
+            T val;
+
+            mover(T&& obj) : val(obj) { }
+
+            mover(mover<T&&>& other) : val(std::move(other)) { }
+
+        };
+
+        template <typename T>
+        struct mover<T&>
+        {
+            T& val;
+
+            mover(T& obj) : val(obj) { }
+
+            mover(mover<T&>& other) : val(other) { }
+        };
+
+        //========================================================
+
         /**
          * A traits struct to figure out the final return type of a pipeline
          * of functions, given a starting type T and one or more callable types.
@@ -284,13 +283,13 @@ namespace Plumbing
          * to obtain the final type
          */
         template <typename T, typename... Funcs>
-        struct connectTraits;
+        struct connect_traits;
 
         /**
          * The base case of a single type.
          */
         template <typename T>
-        struct connectTraits<T>
+        struct connect_traits<T>
         {
             typedef T return_type;
             typedef Sink<return_type> monadic_type;
@@ -300,7 +299,7 @@ namespace Plumbing
          * Specialization for void return: a future.
          */
         template <>
-        struct connectTraits<void>
+        struct connect_traits<void>
         {
             typedef void return_type;
             typedef std::future<void> monadic_type;
@@ -311,23 +310,24 @@ namespace Plumbing
          * passed along.
          */
         template <typename T, typename Func, typename... Funcs>
-        struct connectTraits<T, Func, Funcs...>
+        struct connect_traits<T, Func, Funcs...>
         {
         private:
             // figure out the return type of the function
             typedef decltype( std::declval<Func>()( std::declval<T>() )) T2;
 
             // fold
-            typedef connectTraits<T2, Funcs...> helper_type;
+            typedef connect_traits<T2, Funcs...> helper_type;
         public:
             typedef typename helper_type::return_type return_type;
             typedef typename helper_type::monadic_type monadic_type;
         };
 
+        //========================================================
 
         // creating a struct to specialize template
         template <typename Output>
-        struct connectImpl
+        struct connect_impl
         {
 
             template <typename InputIterable, typename Func>
@@ -353,7 +353,7 @@ namespace Plumbing
         };
 
         template <>
-        struct connectImpl<void>
+        struct connect_impl<void>
         {
 
             /**
@@ -376,33 +376,48 @@ namespace Plumbing
 
     }
 
-    //template <typename InputIterable, typename Func, typename... Funcs>
-    //auto connect(InputIterable&& input, Func func)
-
     // TODO: make connect a member function of sink
     /**
      * @note need to specialize based on output of the function passed in,
-     * so need another layer of indirection to connectImpl.
+     * so need another layer of indirection to connect_impl.
      */
     template <typename InputIterable, typename Func>
     auto connect(InputIterable&& input, Func func)
-    ->  typename detail::connectTraits<
+    ->  typename detail::connect_traits<
                 typename std::remove_reference<InputIterable>::type::iterator::value_type,
                 Func
         >::monadic_type
     {
-        typedef typename detail::connectTraits<
+        typedef typename detail::connect_traits<
                     typename std::remove_reference<InputIterable>::type::iterator::value_type,
                     Func
                 >::return_type return_type;
 
-        return detail::connectImpl<return_type>::connect(std::forward<InputIterable>(input), func);
+        return detail::connect_impl<return_type>::connect(std::forward<InputIterable>(input), func);
+    }
+
+    // TODO: forward funcs too
+    template <typename InputIterable, typename Func, typename Func2, typename... Funcs>
+    auto connect(InputIterable&& input, Func func, Func2 func2, Funcs... funcs)
+    ->  typename detail::connect_traits<
+            typename std::remove_reference<InputIterable>::type::iterator::value_type,
+            Func,
+            Func2,
+            Funcs...
+        >::monadic_type
+    {
+        typedef typename detail::connect_traits<
+                    typename std::remove_reference<InputIterable>::type::iterator::value_type,
+                    Func
+                >::return_type return_type;
+
+        return connect( connect(std::forward<InputIterable>(input), func), func2, funcs... );
     }
 
     //template <typename InputIterable, typename Func>
     //auto connect(InputIterable&& input, Func func)
     //-> decltype(
-            //detail::connectImpl<
+            //detail::connect_impl<
                 //decltype(func(std::declval<typename std::remove_reference<InputIterable>::type::iterator::value_type>()))
             //>::connect(std::forward<InputIterable>(input), func)
        //)
@@ -413,7 +428,7 @@ namespace Plumbing
                     //)
                 //) Output;
 
-        //return detail::connectImpl<Output>::connect(std::forward<InputIterable>(input), func);
+        //return detail::connect_impl<Output>::connect(std::forward<InputIterable>(input), func);
     //}
 
     /**
@@ -427,6 +442,10 @@ namespace Plumbing
     {
         return connect(std::forward<InputIterable>(input), func);
     }
+    // TODO: enforce const& for func, so callable objects passed in do not
+    // rely on mutable state (?) in case the same function is reused on
+    // two separate threads. If not feasible, then passing by value may be
+    // the only way
 
     // TODO: create "bind" that aggregates functions right to left, producing a
     // pipeline. When the pipeline is bound to an iterable, all threads etc.
