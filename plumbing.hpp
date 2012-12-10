@@ -257,7 +257,7 @@ namespace Plumbing
         {
             T val;
 
-            forwarder(T&& obj) : val(obj) { }
+            forwarder(T&& obj) : val(std::move(obj)) { }
 
             forwarder(forwarder<T&&>const & other) :  val(std::move(other.val)) { }
             forwarder(forwarder<T&&>&& other) : val(std::move(other.val)) { }

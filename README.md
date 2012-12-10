@@ -1,4 +1,4 @@
-# Description
+# Plumbing++
 
 Most programmers are familiar with the concept of a Unix pipe. Besides allowing
 easy function composition, they provide an easy way to implicitly run each task
@@ -16,7 +16,7 @@ feed data through them:
 
 To process several images, the simple imperative approach is a for loop:
 
-    std::vector<std:string> paths{"tree.jpg", "mountain.jpg", "car.jpg"};
+    std::vector<std::string> paths{"tree.jpg", "mountain.jpg", "car.jpg"};
 
     for (auto&& path : paths)
     {

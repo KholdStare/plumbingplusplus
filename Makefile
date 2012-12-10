@@ -1,16 +1,18 @@
-PROJ=plumbing_test
+PROGS=plumbing_test test_suite
 
 CC=g++-4.7
 
 DEBUGFLAGS= -g -DDEBUG
 CFLAGS= -Wall -Werror -DUNIX -std=c++11 $(DEBUGFLAGS)
 
-LIBS= -lpthread
+LIBS= -lpthread -lboost_unit_test_framework
+
+all: $(PROGS)
  
-$(PROJ): $(PROJ).cpp
+%: %.cpp
 	$(CC) $(CFLAGS) -o $@ $^ $(INC_DIRS:%=-I%) $(LIB_DIRS:%=-L%) $(LIBS)
 
 .PHONY: clean
 
 clean:
-	rm $(PROJ)
+	rm $(PROGS)
