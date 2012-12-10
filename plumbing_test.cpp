@@ -21,18 +21,18 @@ void testSplitting()
 
     // both threads are reading from the same pipe
     std::thread a([&](){ 
-            while (pipe.isOpen())
-            {
-                std::cout << "Thread A: " << pipe.dequeue() << std::endl;
-            }
-            });
+        while (pipe.isOpen())
+        {
+            std::cout << "Thread A: " << pipe.dequeue() << std::endl;
+        }
+    });
 
     std::thread b([&](){ 
-            while (pipe.isOpen())
-            {
-                std::cout << "Thread B: " << pipe.dequeue() << std::endl;
-            }
-            });
+        while (pipe.isOpen())
+        {
+            std::cout << "Thread B: " << pipe.dequeue() << std::endl;
+        }
+    });
 
     for (auto& e : vals) {
         pipe.enqueue(e);

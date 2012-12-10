@@ -433,27 +433,9 @@ namespace Plumbing
         return connect( connect(std::forward<InputIterable>(input), func), func2, funcs... );
     }
 
-    //template <typename InputIterable, typename Func>
-    //auto connect(InputIterable&& input, Func func)
-    //-> decltype(
-            //detail::connect_impl<
-                //decltype(func(std::declval<typename std::remove_reference<InputIterable>::type::iterator::value_type>()))
-            //>::connect(std::forward<InputIterable>(input), func)
-       //)
-    //{
-        //typedef decltype(
-                    //func(
-                        //std::declval<typename std::remove_reference<InputIterable>::type::iterator::value_type>()
-                    //)
-                //) Output;
-
-        //return detail::connect_impl<Output>::connect(std::forward<InputIterable>(input), func);
-    //}
-
     /**
      * @note: Perhaps this operator is too generically templated, and would "poison"
-     * the code it is imported into? Using a connect function doesn't seem as
-     * "slick"
+     * the code it is imported into?
      */
     template <typename InputIterable, typename Func>
     inline auto operator >> (InputIterable&& input, Func func)
