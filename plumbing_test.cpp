@@ -73,8 +73,9 @@ int main(int argc, char const *argv[])
 
     //testSplitting();
     
-    // testforwarder;
-    std::string s("Testing forwarder");
+    // test forwarder
+    std::string s("Testing forwarder with a sufficiently long sentence.\n\
+            In fact, let's add some more text just to make it very long.");
     detail::forwarder<std::string&&> m(std::move(s));
     detail::forwarder<std::string&&> m2(m);
     std::cout << m2.val << std::endl;
@@ -88,15 +89,8 @@ int main(int argc, char const *argv[])
             return s[0]; // print first character
         };
 
-    //auto printLine =
-        //[](char c)
-        //{
-            //std::cout << c << std::endl;
-        //};
-
-    //( vals >> getFirstChar >> printLine ).wait();
+    ( vals >> getFirstChar >> printLine<char> ).wait();
     connect( vals, getFirstChar, printLine<char> ).wait();
-    //connect( vals, getFirstChar);
     connect( vals, printLine<std::string>).wait();
 
     return 0;

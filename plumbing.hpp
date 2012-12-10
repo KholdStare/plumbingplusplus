@@ -244,7 +244,7 @@ namespace Plumbing
     {
 
         /**
-         * A helper "hack" to get around lambdas lacking a "capture by move".
+         * A helper hack to get around lambdas lacking a "capture by move".
          */
         template <typename T> struct forwarder;
 
@@ -275,6 +275,12 @@ namespace Plumbing
             forwarder(forwarder<T&>&& other) : val(other.val) { }
         };
 
+        /**
+         * Convenience function that creates a forwarder for a perfectly forwarded
+         * type. Make sure to call with std::forward(obj) when calling this function,
+         * if you want to perfect forward from your context to the lambda that will
+         * consume this.
+         */
         template <typename T>
         inline auto make_forwarder(T&& obj)
         -> forwarder<decltype(std::forward<T>(obj))>
@@ -344,16 +350,18 @@ namespace Plumbing
             {
                 std::shared_ptr<Pipe<Output>> pipe(new Pipe<Output>(2)); // TODO make this customizable
 
+                auto inputForwarder = make_forwarder(std::forward<InputIterable>(input));
+
                 // start processing thread
                 std::thread processingThread(
-                        [pipe, &input, func]()
+                        [inputForwarder, pipe, func]() mutable
                         {
-                            for (auto&& e : input) {
+                            for (auto&& e : inputForwarder.val) {
                                 pipe->enqueue(func(e));
                             }
                             pipe->close();
                         }
-                        );
+                );
 
                 processingThread.detach(); // TODO: shouldn't detach?
 
@@ -375,13 +383,12 @@ namespace Plumbing
 
                 // start processing thread
                 return std::async(std::launch::async,
-                        [func](decltype(inputForwarder) inputForwarder)
+                        [inputForwarder, func]() mutable
                         {
                             for (auto&& e : inputForwarder.val) {
                                 func(e);
                             }
-                        },
-                        inputForwarder
+                        }
                 );
             }
         };
