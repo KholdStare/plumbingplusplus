@@ -17,7 +17,6 @@
 
 using namespace Plumbing;
 
-// most frequently you implement test cases as a free functions with automatic registration
 BOOST_AUTO_TEST_CASE( empty_pipe )
 {
     Pipe<std::string> pipe;
@@ -238,102 +237,59 @@ BOOST_AUTO_TEST_CASE( move_checker_move )
 
 //____________________________________________________________________________//
 
-BOOST_AUTO_TEST_CASE( forwarder_explicit_init )
-{
-    move_checker checker;
-    move_checker copy(checker);
-
-    BOOST_CHECK_EQUAL( checker.copies(), 1 );
-    BOOST_CHECK_EQUAL( copy.copies(), 1 );
-    BOOST_CHECK_EQUAL( checker.moves(), 0 );
-    BOOST_CHECK_EQUAL( copy.moves(), 0 );
-
-    struct detail::forwarder<move_checker&&> f(std::move(copy));
-
-    BOOST_CHECK_EQUAL( f.val.copies(), 1 );
-    BOOST_CHECK_EQUAL( f.val.moves(), 1 );
-}
-
-//____________________________________________________________________________//
-
-BOOST_AUTO_TEST_CASE( forwarder_make_init )
-{
-    move_checker checker;
-    move_checker copy(checker);
-
-    BOOST_CHECK_EQUAL( checker.copies(), 1 );
-    BOOST_CHECK_EQUAL( copy.copies(), 1 );
-    BOOST_CHECK_EQUAL( checker.moves(), 0 );
-    BOOST_CHECK_EQUAL( copy.moves(), 0 );
-
-    auto f = detail::make_forwarder(std::move(copy));
-    (void) f;
-
-    BOOST_CHECK_EQUAL( f.val.copies(), 1 );
-    BOOST_CHECK_EQUAL( f.val.moves(), 1 );
-}
-
-//____________________________________________________________________________//
- 
-BOOST_AUTO_TEST_CASE( forwarder_copy )
-{
-    move_checker checker;
-    move_checker copy(checker);
-
-    BOOST_CHECK_EQUAL( checker.copies(), 1 );
-    BOOST_CHECK_EQUAL( copy.copies(), 1 );
-    BOOST_CHECK_EQUAL( checker.moves(), 0 );
-    BOOST_CHECK_EQUAL( copy.moves(), 0 );
-
-    auto f = detail::make_forwarder(std::move(copy));
-
-    BOOST_CHECK_EQUAL( f.val.copies(), 1 );
-    BOOST_CHECK_EQUAL( f.val.moves(), 1 );
-
-    struct detail::forwarder<move_checker&&> f2(f);
-
-    BOOST_CHECK_EQUAL( f2.val.copies(), 1 );
-    BOOST_CHECK_EQUAL( f2.val.moves(), 2 );
-}
-
-//____________________________________________________________________________//
- 
-BOOST_AUTO_TEST_CASE( forwarder_move )
-{
-    move_checker checker;
-    move_checker copy(checker);
-
-    BOOST_CHECK_EQUAL( checker.copies(), 1 );
-    BOOST_CHECK_EQUAL( copy.copies(), 1 );
-    BOOST_CHECK_EQUAL( checker.moves(), 0 );
-    BOOST_CHECK_EQUAL( copy.moves(), 0 );
-
-    auto f = detail::make_forwarder(std::move(copy));
-    struct detail::forwarder<move_checker&&> f2(std::move(f));
-
-    BOOST_CHECK_EQUAL( f2.val.copies(), 1 );
-    BOOST_CHECK_EQUAL( f2.val.moves(), 2 );
-}
-
-//____________________________________________________________________________//
-
 template <typename T>
 std::string accessValue(T&& checker) // checker here will be move_checker
 {
-    auto&& f = detail::make_forwarder(std::forward<T>(checker));
+    //auto&& f = detail::make_forwarder(std::forward<T>(checker));
+    typedef decltype(std::forward<T>(checker)) forwarded_type;
 
-    std::string output;
     auto lambda =
-        [f, &output]() mutable
+        [](forwarded_type checker) mutable
         {
-            output = f.val.payload[0];
+            return checker.payload[0];
         };
 
-    lambda();
-    return output;
+    return lambda(std::forward<T>(checker));
 }
 
-BOOST_AUTO_TEST_CASE( forwarder_lambda )
+template <typename T>
+std::string accessValueAsync(T&& checker) // checker here will be move_checker
+{
+    typedef decltype(std::forward<T>(checker)) forwarded_type;
+
+    std::future<std::string> fut =
+        std::async(std::launch::async,
+            [](forwarded_type checker) mutable
+            {
+                return checker.payload[0];
+            },
+            std::forward<T>(checker));
+
+    return fut.get();
+}
+
+
+BOOST_AUTO_TEST_CASE( forwarded_lambda_reference )
+{
+    move_checker checker;
+    move_checker copy(checker);
+
+    BOOST_CHECK_EQUAL( checker.copies(), 1 );
+    BOOST_CHECK_EQUAL( copy.copies(), 1 );
+    BOOST_CHECK_EQUAL( checker.moves(), 0 );
+    BOOST_CHECK_EQUAL( copy.moves(), 0 );
+
+    std::string output = accessValue(copy);
+
+    BOOST_CHECK_EQUAL( checker.copies(), 1 );
+    BOOST_CHECK_EQUAL( checker.moves(), 0 );
+
+    BOOST_CHECK_EQUAL( output, "Wololo" );
+}
+
+//____________________________________________________________________________//
+
+BOOST_AUTO_TEST_CASE( forwarded_lambda_move )
 {
     move_checker checker;
     move_checker copy(checker);
@@ -347,6 +303,56 @@ BOOST_AUTO_TEST_CASE( forwarder_lambda )
 
     BOOST_CHECK_EQUAL( checker.copies(), 1 );
     BOOST_CHECK_EQUAL( checker.moves(), 0 );
+
+    BOOST_CHECK_EQUAL( output, "Wololo" );
+}
+
+//____________________________________________________________________________//
+
+BOOST_AUTO_TEST_CASE( forwarded_lambda_move_async )
+{
+    move_checker checker;
+    move_checker copy(checker);
+
+    BOOST_CHECK_EQUAL( checker.copies(), 1 );
+    BOOST_CHECK_EQUAL( copy.copies(), 1 );
+    BOOST_CHECK_EQUAL( checker.moves(), 0 );
+    BOOST_CHECK_EQUAL( copy.moves(), 0 );
+
+    std::string output = accessValueAsync(std::move(copy));
+
+    BOOST_CHECK_EQUAL( checker.copies(), 1 );
+    BOOST_CHECK_EQUAL( checker.moves(), 2 );
+
+    BOOST_CHECK_EQUAL( output, "Wololo" );
+}
+
+//____________________________________________________________________________//
+
+BOOST_AUTO_TEST_CASE( lambda_move_async )
+{
+    move_checker checker;
+    move_checker copy(checker);
+
+    BOOST_CHECK_EQUAL( checker.copies(), 1 );
+    BOOST_CHECK_EQUAL( copy.copies(), 1 );
+    BOOST_CHECK_EQUAL( checker.moves(), 0 );
+    BOOST_CHECK_EQUAL( copy.moves(), 0 );
+
+    std::future<std::string> fut =
+        std::async(std::launch::async,
+            //[](forwarded_type checker) mutable
+            [](move_checker&& c) mutable
+            {
+                return c.payload[0];
+            },
+            std::move(copy)
+        );
+
+    std::string output = fut.get();
+
+    BOOST_CHECK_EQUAL( checker.copies(), 1 );
+    BOOST_CHECK_EQUAL( checker.moves(), 2 );
 
     BOOST_CHECK_EQUAL( output, "Wololo" );
 }
