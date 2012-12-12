@@ -73,13 +73,6 @@ int main(int argc, char const *argv[])
 
     //testSplitting();
     
-    // test forwarder
-    std::string s("Testing forwarder with a sufficiently long sentence.\n\
-            In fact, let's add some more text just to make it very long.");
-    detail::forwarder<std::string&&> m(std::move(s));
-    detail::forwarder<std::string&&> m2(m);
-    std::cout << m2.val << std::endl;
-
     // testing connect
     std::cout << std::endl;
     std::cout << "Connect test:" << std::endl;

@@ -1,5 +1,3 @@
-// ideas for "couplings" and fifos between transformations
-
 #ifndef PLUMBING_H_IEGJRLCP
 #define PLUMBING_H_IEGJRLCP
 
@@ -249,50 +247,28 @@ namespace Plumbing
     {
 
         /**
-         * A helper hack to get around lambdas lacking a "capture by move".
+         * A type trait to be used for perfect forwarding to a lambda
+         * in an async call. A copy is inevitable if passing by lvalue
+         * reference, so the receiving type is engineered so forwarding
+         * incurs the least amount of copies/moves.
+         *
+         * See http://stackoverflow.com/questions/13813838/perfect-forwarding-to-async-lambda
+         * for details on the problem. This is a temporary solution.
+         * TODO: figure out a "good" solution.
          */
-        template <typename T> struct forwarder;
+        template <typename T> struct async_forward;
 
-        /**
-         * Specialization for rvalue references. Essentially makes the 
-         * copy constructor behave like a move.
-         */
         template <typename T>
-        struct forwarder<T&&>
+        struct async_forward
         {
-            T val;
-
-            forwarder(T&& obj) : val(std::move(obj)) { }
-
-            forwarder(forwarder<T&&>const & other) :  val(std::move(other.val)) { }
-            forwarder(forwarder<T&&>&& other) : val(std::move(other.val)) { }
-
+            typedef T&& type;
         };
 
         template <typename T>
-        struct forwarder<T&>
+        struct async_forward<T&>
         {
-            T& val;
-
-            forwarder(T& obj) : val(obj) { }
-
-            forwarder(forwarder<T&>const & other) :  val(other.val) { }
-            forwarder(forwarder<T&>&& other) : val(other.val) { }
+            typedef T const& type;
         };
-
-        /**
-         * Convenience function that creates a forwarder for a perfectly forwarded
-         * type. Make sure to call with std::forward(obj) when calling this function,
-         * if you want to perfect forward from your context to the lambda that will
-         * consume this.
-         */
-        template <typename T>
-        inline auto make_forwarder(T&& obj)
-        -> forwarder<decltype(std::forward<T>(obj))>
-        {
-            typedef decltype(std::forward<T>(obj)) forwarded_type;
-            return detail::forwarder<forwarded_type>(std::forward<T>(obj));
-        }
 
         //========================================================
 
@@ -355,17 +331,18 @@ namespace Plumbing
             {
                 std::shared_ptr<Pipe<Output>> pipe(new Pipe<Output>(2)); // TODO make this customizable
 
-                auto inputForwarder = make_forwarder(std::forward<InputIterable>(input));
+                typedef typename detail::async_forward<InputIterable>::type async_type;
 
                 // start processing thread
                 std::thread processingThread(
-                        [inputForwarder, pipe, func]() mutable
+                        [pipe, func](async_type input) mutable
                         {
-                            for (auto&& e : inputForwarder.val) {
+                            for (auto&& e : input) {
                                 pipe->enqueue(func(e));
                             }
                             pipe->close();
-                        }
+                        },
+                        std::forward<InputIterable>(input)
                 );
 
                 processingThread.detach(); // TODO: shouldn't detach?
@@ -384,16 +361,17 @@ namespace Plumbing
             template <typename InputIterable, typename Func>
             static std::future<void> connect(InputIterable&& input, Func func)
             {
-                auto inputForwarder = make_forwarder(std::forward<InputIterable>(input));
+                typedef typename detail::async_forward<InputIterable>::type async_type;
 
                 // start processing thread
                 return std::async(std::launch::async,
-                        [inputForwarder, func]() mutable
+                        [func](async_type input) mutable
                         {
-                            for (auto&& e : inputForwarder.val) {
+                            for (auto&& e : input) {
                                 func(e);
                             }
-                        }
+                        },
+                        std::forward<InputIterable>(input)
                 );
             }
         };

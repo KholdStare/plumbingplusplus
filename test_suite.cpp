@@ -240,11 +240,9 @@ BOOST_AUTO_TEST_CASE( move_checker_move )
 template <typename T>
 std::string accessValue(T&& checker) // checker here will be move_checker
 {
-    //auto&& f = detail::make_forwarder(std::forward<T>(checker));
-    typedef decltype(std::forward<T>(checker)) forwarded_type;
-
     auto lambda =
-        [](forwarded_type checker) mutable
+        //[](forwarded_type checker) mutable
+        [](T&& checker) mutable
         {
             return checker.payload[0];
         };
@@ -252,14 +250,15 @@ std::string accessValue(T&& checker) // checker here will be move_checker
     return lambda(std::forward<T>(checker));
 }
 
+
 template <typename T>
 std::string accessValueAsync(T&& checker) // checker here will be move_checker
 {
-    typedef decltype(std::forward<T>(checker)) forwarded_type;
+    typedef typename detail::async_forward<T>::type async_type;
 
     std::future<std::string> fut =
         std::async(std::launch::async,
-            [](forwarded_type checker) mutable
+            [](async_type checker) mutable
             {
                 return checker.payload[0];
             },
@@ -303,6 +302,27 @@ BOOST_AUTO_TEST_CASE( forwarded_lambda_move )
 
     BOOST_CHECK_EQUAL( checker.copies(), 1 );
     BOOST_CHECK_EQUAL( checker.moves(), 0 );
+
+    BOOST_CHECK_EQUAL( output, "Wololo" );
+}
+
+//____________________________________________________________________________//
+
+BOOST_AUTO_TEST_CASE( forwarded_lambda_copy_async )
+{
+    move_checker checker;
+    move_checker copy(checker);
+
+    BOOST_CHECK_EQUAL( checker.copies(), 1 );
+    BOOST_CHECK_EQUAL( copy.copies(), 1 );
+    BOOST_CHECK_EQUAL( checker.moves(), 0 );
+    BOOST_CHECK_EQUAL( copy.moves(), 0 );
+
+    std::string output = accessValueAsync(copy);
+
+    // costs us one move and one copy unfortunately
+    BOOST_CHECK_EQUAL( checker.copies(), 2 );
+    BOOST_CHECK_EQUAL( checker.moves(), 1 );
 
     BOOST_CHECK_EQUAL( output, "Wololo" );
 }
