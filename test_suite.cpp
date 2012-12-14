@@ -139,6 +139,8 @@ BOOST_AUTO_TEST_SUITE_END()
 
 BOOST_AUTO_TEST_SUITE(perfect_forwarding)
 
+char const* payloadString = "Wololo";
+
 /**
  * A helper class to keep track of the number of moves/copies.
  *
@@ -156,7 +158,7 @@ public:
     move_checker()
         : copies_(new int(0)),
           moves_(new int(0)),
-          payload(1000, std::string("Wololo"))
+          payload(1000, std::string(payloadString))
     { }
 
     move_checker(move_checker const& other)
@@ -257,7 +259,6 @@ template <typename T>
 std::string accessValue(T&& checker) // checker here will be move_checker
 {
     auto lambda =
-        //[](forwarded_type checker) mutable
         [](T&& checker) mutable
         {
             return checker.payload[0];
@@ -299,7 +300,7 @@ BOOST_AUTO_TEST_CASE( forwarded_lambda_reference )
     BOOST_CHECK_EQUAL( checker.copies(), 1 );
     BOOST_CHECK_EQUAL( checker.moves(), 0 );
 
-    BOOST_CHECK_EQUAL( output, "Wololo" );
+    BOOST_CHECK_EQUAL( output, payloadString);
 }
 
 BOOST_AUTO_TEST_CASE( forwarded_lambda_move )
@@ -317,7 +318,7 @@ BOOST_AUTO_TEST_CASE( forwarded_lambda_move )
     BOOST_CHECK_EQUAL( checker.copies(), 1 );
     BOOST_CHECK_EQUAL( checker.moves(), 0 );
 
-    BOOST_CHECK_EQUAL( output, "Wololo" );
+    BOOST_CHECK_EQUAL( output, payloadString);
 }
 
 BOOST_AUTO_TEST_CASE( forwarded_lambda_copy_async )
@@ -336,7 +337,7 @@ BOOST_AUTO_TEST_CASE( forwarded_lambda_copy_async )
     BOOST_CHECK_EQUAL( checker.copies(), 2 );
     BOOST_CHECK_EQUAL( checker.moves(), 2 );
 
-    BOOST_CHECK_EQUAL( output, "Wololo" );
+    BOOST_CHECK_EQUAL( output, payloadString);
 }
 
 BOOST_AUTO_TEST_CASE( forwarded_lambda_move_async )
@@ -354,7 +355,7 @@ BOOST_AUTO_TEST_CASE( forwarded_lambda_move_async )
     BOOST_CHECK_EQUAL( checker.copies(), 1 );
     BOOST_CHECK_EQUAL( checker.moves(), 2 );
 
-    BOOST_CHECK_EQUAL( output, "Wololo" );
+    BOOST_CHECK_EQUAL( output, payloadString);
 }
 
 BOOST_AUTO_TEST_CASE( lambda_move_async )
@@ -381,7 +382,42 @@ BOOST_AUTO_TEST_CASE( lambda_move_async )
     BOOST_CHECK_EQUAL( checker.copies(), 1 );
     BOOST_CHECK_EQUAL( checker.moves(), 2 );
 
-    BOOST_CHECK_EQUAL( output, "Wololo" );
+    BOOST_CHECK_EQUAL( output, payloadString);
+}
+
+/**
+ * Check the cost of moving through a pipe in terms of moves and copies.
+ */
+BOOST_AUTO_TEST_CASE( move_through_pipe )
+{
+    Pipe<move_checker> pipe;
+    move_checker checker;
+    move_checker copy(checker);
+
+    BOOST_CHECK_EQUAL( checker.copies(), 1 );
+    BOOST_CHECK_EQUAL( copy.copies(), 1 );
+    BOOST_CHECK_EQUAL( checker.moves(), 0 );
+    BOOST_CHECK_EQUAL( copy.moves(), 0 );
+
+    pipe.enqueue(checker);
+
+    BOOST_CHECK_EQUAL( checker.copies(), 2 );
+    BOOST_CHECK_EQUAL( checker.moves(), 0 );
+
+    auto result = pipe.dequeue();
+
+    BOOST_CHECK_EQUAL( checker.copies(), 3 );
+    BOOST_CHECK_EQUAL( checker.moves(), 0 );
+
+    pipe.enqueue(std::move(copy));
+
+    BOOST_CHECK_EQUAL( checker.copies(), 4 );
+    BOOST_CHECK_EQUAL( checker.moves(), 0 );
+
+    auto result2 = pipe.dequeue();
+
+    BOOST_CHECK_EQUAL( checker.copies(), 5 );
+    BOOST_CHECK_EQUAL( checker.moves(), 0 );
 }
 
 BOOST_AUTO_TEST_CASE( simple_pipeline )
@@ -448,7 +484,7 @@ BOOST_AUTO_TEST_CASE( two_part_pipeline )
     BOOST_CHECK_EQUAL( output.size(), 20 );
     BOOST_CHECK_EQUAL( output[0], "Trololo" );
     BOOST_CHECK_EQUAL( checkerVec[0].copies(), 8 );
-    BOOST_CHECK_EQUAL( checkerVec[0].moves(), 1 );
+    BOOST_CHECK_EQUAL( checkerVec[0].moves(), 0 );
 }
 
 //____________________________________________________________________________//
