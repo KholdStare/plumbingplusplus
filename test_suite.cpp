@@ -13,9 +13,12 @@
 
 #include "plumbing.hpp"
 
-//____________________________________________________________________________//
 
 using namespace Plumbing;
+
+//____________________________________________________________________________//
+
+BOOST_AUTO_TEST_SUITE(pipe_tests)
 
 BOOST_AUTO_TEST_CASE( empty_pipe )
 {
@@ -37,8 +40,6 @@ BOOST_AUTO_TEST_CASE( empty_pipe )
 
     a.join();
 }
-
-//____________________________________________________________________________//
 
 BOOST_AUTO_TEST_CASE( one_element_pipe )
 {
@@ -67,8 +68,6 @@ BOOST_AUTO_TEST_CASE( one_element_pipe )
 
     BOOST_CHECK_EQUAL( output[0], 42 );
 }
-
-//____________________________________________________________________________//
 
 BOOST_AUTO_TEST_CASE( many_element_pipe )
 {
@@ -102,8 +101,6 @@ BOOST_AUTO_TEST_CASE( many_element_pipe )
     BOOST_CHECK( output == input );
 }
 
-//____________________________________________________________________________//
-
 BOOST_AUTO_TEST_CASE( larger_capacity_pipe )
 {
     Pipe<int> pipe(5);
@@ -136,6 +133,10 @@ BOOST_AUTO_TEST_CASE( larger_capacity_pipe )
     BOOST_CHECK( output == input );
 }
 
+BOOST_AUTO_TEST_SUITE_END()
+
+//____________________________________________________________________________//
+
 BOOST_AUTO_TEST_SUITE(perfect_forwarding)
 
 /**
@@ -166,12 +167,34 @@ public:
         *copies_ += 1;
     }
 
+    move_checker& operator = (move_checker const& other)
+    {
+        copies_ = other.copies_;
+        moves_ = other.moves_;
+        payload = other.payload;
+
+        *copies_ += 1;
+
+        return *this;
+    }
+
     move_checker(move_checker&& other)
         : copies_(std::move(other.copies_)),
           moves_(std::move(other.moves_)),
           payload(std::move(other.payload))
     {
         *moves_ += 1;
+    }
+
+    move_checker& operator = (move_checker&& other)
+    {
+        copies_ = std::move(other.copies_);
+        moves_ = std::move(other.moves_);
+        payload = std::move(other.payload);
+
+        *moves_ += 1;
+
+        return *this;
     }
 
     int copies() const { return *copies_; }
@@ -186,7 +209,6 @@ BOOST_AUTO_TEST_CASE( move_checker_init )
     BOOST_CHECK_EQUAL( checker.moves(), 0 );
 }
 
-//____________________________________________________________________________//
 
 BOOST_AUTO_TEST_CASE( move_checker_copy )
 {
@@ -203,8 +225,6 @@ BOOST_AUTO_TEST_CASE( move_checker_copy )
     BOOST_CHECK_EQUAL( copy.moves(), 0 );
 }
 
-//____________________________________________________________________________//
-
 BOOST_AUTO_TEST_CASE( move_checker_copy_assignment )
 {
     move_checker checker;
@@ -220,8 +240,6 @@ BOOST_AUTO_TEST_CASE( move_checker_copy_assignment )
     BOOST_CHECK_EQUAL( copy.moves(), 0 );
 }
 
-//____________________________________________________________________________//
-
 BOOST_AUTO_TEST_CASE( move_checker_move )
 {
     move_checker checker;
@@ -234,8 +252,6 @@ BOOST_AUTO_TEST_CASE( move_checker_move )
     BOOST_CHECK_EQUAL( copy.copies(), 0 );
     BOOST_CHECK_EQUAL( copy.moves(), 1 );
 }
-
-//____________________________________________________________________________//
 
 template <typename T>
 std::string accessValue(T&& checker) // checker here will be move_checker
@@ -286,8 +302,6 @@ BOOST_AUTO_TEST_CASE( forwarded_lambda_reference )
     BOOST_CHECK_EQUAL( output, "Wololo" );
 }
 
-//____________________________________________________________________________//
-
 BOOST_AUTO_TEST_CASE( forwarded_lambda_move )
 {
     move_checker checker;
@@ -306,8 +320,6 @@ BOOST_AUTO_TEST_CASE( forwarded_lambda_move )
     BOOST_CHECK_EQUAL( output, "Wololo" );
 }
 
-//____________________________________________________________________________//
-
 BOOST_AUTO_TEST_CASE( forwarded_lambda_copy_async )
 {
     move_checker checker;
@@ -322,12 +334,10 @@ BOOST_AUTO_TEST_CASE( forwarded_lambda_copy_async )
 
     // costs us one move and one copy unfortunately
     BOOST_CHECK_EQUAL( checker.copies(), 2 );
-    BOOST_CHECK_EQUAL( checker.moves(), 1 );
+    BOOST_CHECK_EQUAL( checker.moves(), 2 );
 
     BOOST_CHECK_EQUAL( output, "Wololo" );
 }
-
-//____________________________________________________________________________//
 
 BOOST_AUTO_TEST_CASE( forwarded_lambda_move_async )
 {
@@ -347,8 +357,6 @@ BOOST_AUTO_TEST_CASE( forwarded_lambda_move_async )
     BOOST_CHECK_EQUAL( output, "Wololo" );
 }
 
-//____________________________________________________________________________//
-
 BOOST_AUTO_TEST_CASE( lambda_move_async )
 {
     move_checker checker;
@@ -361,7 +369,6 @@ BOOST_AUTO_TEST_CASE( lambda_move_async )
 
     std::future<std::string> fut =
         std::async(std::launch::async,
-            //[](forwarded_type checker) mutable
             [](move_checker&& c) mutable
             {
                 return c.payload[0];
@@ -376,5 +383,74 @@ BOOST_AUTO_TEST_CASE( lambda_move_async )
 
     BOOST_CHECK_EQUAL( output, "Wololo" );
 }
+
+BOOST_AUTO_TEST_CASE( simple_pipeline )
+{
+    std::vector<move_checker> checkerVec(10);
+    std::vector<std::string> output;
+
+    auto testFunc =
+        [&](move_checker const& checker) mutable
+        {
+            output.push_back(checker.payload[0]);
+        };
+
+    connect(checkerVec, testFunc).wait();
+
+    BOOST_CHECK_EQUAL( output.size(), 10 );
+    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 1 );
+    BOOST_CHECK_EQUAL( checkerVec[0].moves(), 0 );
+
+    std::vector<move_checker> checkerVecCopy(checkerVec);
+
+    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 2 );
+    BOOST_CHECK_EQUAL( checkerVec[0].moves(), 0 );
+
+    connect(std::move(checkerVecCopy), testFunc).wait();
+
+    BOOST_CHECK_EQUAL( output.size(), 20 );
+    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 2 );
+    BOOST_CHECK_EQUAL( checkerVec[0].moves(), 0 );
+}
+
+move_checker modifyMoveChecker(move_checker& checker) 
+{
+    checker.payload[0] = "Trololo";
+
+    return checker;
+}
+
+BOOST_AUTO_TEST_CASE( two_part_pipeline )
+{
+    std::vector<move_checker> checkerVec(10);
+    std::vector<std::string> output;
+
+    auto testFunc =
+        [&](move_checker const& checker) mutable
+        {
+            output.push_back(checker.payload[0]);
+        };
+
+    connect(checkerVec, modifyMoveChecker, testFunc).wait();
+
+    BOOST_CHECK_EQUAL( output.size(), 10 );
+    BOOST_CHECK_EQUAL( output[0], "Trololo" );
+    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 4 );
+    BOOST_CHECK_EQUAL( checkerVec[0].moves(), 0 );
+
+    std::vector<move_checker> checkerVecCopy(checkerVec);
+
+    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 5 );
+    BOOST_CHECK_EQUAL( checkerVec[0].moves(), 0 );
+
+    connect(std::move(checkerVecCopy), modifyMoveChecker, testFunc).wait();
+
+    BOOST_CHECK_EQUAL( output.size(), 20 );
+    BOOST_CHECK_EQUAL( output[0], "Trololo" );
+    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 8 );
+    BOOST_CHECK_EQUAL( checkerVec[0].moves(), 1 );
+}
+
+//____________________________________________________________________________//
 
 BOOST_AUTO_TEST_SUITE_END()

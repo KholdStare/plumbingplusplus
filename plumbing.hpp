@@ -267,7 +267,7 @@ namespace Plumbing
         template <typename T>
         struct async_forward<T&>
         {
-            typedef T const& type;
+            typedef T type;
         };
 
         //========================================================
@@ -279,16 +279,16 @@ namespace Plumbing
          * Essentially carries out a fold, applying the functions in order on T,
          * to obtain the final type
          */
-        template <typename T, typename... Funcs>
+        template <typename InputIterable, typename... Funcs>
         struct connect_traits;
 
         /**
          * The base case of a single type.
          */
-        template <typename T>
-        struct connect_traits<T>
+        template <typename InputIterable>
+        struct connect_traits<InputIterable>
         {
-            typedef T return_type;
+            typedef decltype( *std::declval<InputIterable>().begin() ) return_type;
             typedef Sink<return_type> monadic_type;
         };
 
@@ -296,7 +296,7 @@ namespace Plumbing
          * Specialization for void return: a future.
          */
         template <>
-        struct connect_traits<void>
+        struct connect_traits<Sink<void>>
         {
             typedef void return_type;
             typedef std::future<void> monadic_type;
@@ -306,15 +306,15 @@ namespace Plumbing
          * The recursive case, where the first return_type is figured out, and
          * passed along.
          */
-        template <typename T, typename Func, typename... Funcs>
-        struct connect_traits<T, Func, Funcs...>
+        template <typename InputIterable, typename Func, typename... Funcs>
+        struct connect_traits<InputIterable, Func, Funcs...>
         {
         private:
             // figure out the return type of the function
-            typedef decltype( std::declval<Func>()( std::declval<T>() )) T2;
+            typedef decltype( std::declval<Func>()( *std::declval<InputIterable>().begin() )) T;
 
             // fold
-            typedef connect_traits<T2, Funcs...> helper_type;
+            typedef connect_traits<Sink<T>, Funcs...> helper_type;
         public:
             typedef typename helper_type::return_type return_type;
             typedef typename helper_type::monadic_type monadic_type;
@@ -337,8 +337,10 @@ namespace Plumbing
                 std::thread processingThread(
                         [pipe, func](async_type input) mutable
                         {
-                            for (auto&& e : input) {
-                                pipe->enqueue(func(e));
+                            for (auto it = input.begin(), end = input.end(); it != end; ++it)
+                            {
+                                auto&& result = func(*it);
+                                pipe->enqueue(result);
                             }
                             pipe->close();
                         },
@@ -367,8 +369,12 @@ namespace Plumbing
                 return std::async(std::launch::async,
                         [func](async_type input) mutable
                         {
-                            for (auto&& e : input) {
-                                func(e);
+                            // using iterators directly, and not range-based for,
+                            // because want to pass *iterator directly to function,
+                            // without first binding it to an lvalue.
+                            for (auto it = input.begin(), end = input.end(); it != end; ++it)
+                            {
+                                func(*it);
                             }
                         },
                         std::forward<InputIterable>(input)
@@ -382,16 +388,19 @@ namespace Plumbing
     /**
      * @note need to specialize based on output of the function passed in,
      * so need another layer of indirection to connect_impl.
+     *
+     * @note functions passed in have to take arguments either by T&& or Tconst&,
+     * in other words input arguments must be able to bind to rvalues.
      */
     template <typename InputIterable, typename Func>
     auto connect(InputIterable&& input, Func func)
     ->  typename detail::connect_traits<
-                typename std::remove_reference<InputIterable>::type::iterator::value_type,
+                InputIterable,
                 Func
         >::monadic_type
     {
         typedef typename detail::connect_traits<
-                    typename std::remove_reference<InputIterable>::type::iterator::value_type,
+                    InputIterable,
                     Func
                 >::return_type return_type;
 
@@ -402,14 +411,14 @@ namespace Plumbing
     template <typename InputIterable, typename Func, typename Func2, typename... Funcs>
     auto connect(InputIterable&& input, Func func, Func2 func2, Funcs... funcs)
     ->  typename detail::connect_traits<
-            typename std::remove_reference<InputIterable>::type::iterator::value_type,
+            InputIterable,
             Func,
             Func2,
             Funcs...
         >::monadic_type
     {
         typedef typename detail::connect_traits<
-                    typename std::remove_reference<InputIterable>::type::iterator::value_type,
+                    InputIterable,
                     Func
                 >::return_type return_type;
 
@@ -426,6 +435,7 @@ namespace Plumbing
     {
         return connect(std::forward<InputIterable>(input), func);
     }
+
     // TODO: enforce const& for func, so callable objects passed in do not
     // rely on mutable state (?) in case the same function is reused on
     // two separate threads. If not feasible, then passing by value may be
@@ -435,6 +445,9 @@ namespace Plumbing
     // pipeline. When the pipeline is bound to an iterable, all threads etc.
     // are instantiated as necessary
     // Haskell's >>= ?
+    
+    // TODO: create a "Pump" class to encapsulate an input to a pipe, so ">>"
+    // can be used safely
 
 }
 
