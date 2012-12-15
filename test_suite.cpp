@@ -271,15 +271,13 @@ std::string accessValue(T&& checker) // checker here will be move_checker
 template <typename T>
 std::string accessValueAsync(T&& checker) // checker here will be move_checker
 {
-    typedef typename detail::async_forward<T>::type async_type;
-
     std::future<std::string> fut =
         std::async(std::launch::async,
-            [](async_type checker) mutable
+            [](detail::async_forwarder<T> checker) mutable
             {
-                return checker.payload[0];
+                return checker->payload[0];
             },
-            std::forward<T>(checker));
+            detail::async_forwarder<T>(std::forward<T>(checker)));
 
     return fut.get();
 }
@@ -334,8 +332,8 @@ BOOST_AUTO_TEST_CASE( forwarded_lambda_copy_async )
     std::string output = accessValueAsync(copy);
 
     // costs us one move and one copy unfortunately
-    BOOST_CHECK_EQUAL( checker.copies(), 2 );
-    BOOST_CHECK_EQUAL( checker.moves(), 2 );
+    BOOST_CHECK_EQUAL( checker.copies(), 1 );
+    BOOST_CHECK_EQUAL( checker.moves(), 0 );
 
     BOOST_CHECK_EQUAL( output, payloadString);
 }
@@ -353,7 +351,7 @@ BOOST_AUTO_TEST_CASE( forwarded_lambda_move_async )
     std::string output = accessValueAsync(std::move(copy));
 
     BOOST_CHECK_EQUAL( checker.copies(), 1 );
-    BOOST_CHECK_EQUAL( checker.moves(), 2 );
+    BOOST_CHECK_EQUAL( checker.moves(), 4 );
 
     BOOST_CHECK_EQUAL( output, payloadString);
 }
@@ -434,18 +432,18 @@ BOOST_AUTO_TEST_CASE( simple_pipeline )
     connect(checkerVec, testFunc).wait();
 
     BOOST_CHECK_EQUAL( output.size(), 10 );
-    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 1 );
+    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 0 );
     BOOST_CHECK_EQUAL( checkerVec[0].moves(), 0 );
 
     std::vector<move_checker> checkerVecCopy(checkerVec);
 
-    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 2 );
+    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 1 );
     BOOST_CHECK_EQUAL( checkerVec[0].moves(), 0 );
 
     connect(std::move(checkerVecCopy), testFunc).wait();
 
     BOOST_CHECK_EQUAL( output.size(), 20 );
-    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 2 );
+    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 1 );
     BOOST_CHECK_EQUAL( checkerVec[0].moves(), 0 );
 }
 
@@ -471,19 +469,19 @@ BOOST_AUTO_TEST_CASE( two_part_pipeline )
 
     BOOST_CHECK_EQUAL( output.size(), 10 );
     BOOST_CHECK_EQUAL( output[0], "Trololo" );
-    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 4 );
+    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 3 );
     BOOST_CHECK_EQUAL( checkerVec[0].moves(), 0 );
 
     std::vector<move_checker> checkerVecCopy(checkerVec);
 
-    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 5 );
+    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 4 );
     BOOST_CHECK_EQUAL( checkerVec[0].moves(), 0 );
 
     connect(std::move(checkerVecCopy), modifyMoveChecker, testFunc).wait();
 
     BOOST_CHECK_EQUAL( output.size(), 20 );
     BOOST_CHECK_EQUAL( output[0], "Trololo" );
-    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 8 );
+    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 7 );
     BOOST_CHECK_EQUAL( checkerVec[0].moves(), 0 );
 }
 

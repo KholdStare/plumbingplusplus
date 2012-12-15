@@ -247,27 +247,50 @@ namespace Plumbing
     {
 
         /**
-         * A type trait to be used for perfect forwarding to a lambda
-         * in an async call. A copy is inevitable if passing by lvalue
-         * reference, so the receiving type is engineered so forwarding
-         * incurs the least amount of copies/moves.
+         * A wrapper for better forwarding to async lambdas. Prevents a copy,
+         * if T is an lvalue reference (passes a pointer instead).
          *
          * See http://stackoverflow.com/questions/13813838/perfect-forwarding-to-async-lambda
-         * for details on the problem. This is a temporary solution.
-         * TODO: figure out a "good" solution.
+         * for details on the problem.
          */
-        template <typename T> struct async_forward;
+        template <typename T> struct async_forwarder;
 
         template <typename T>
-        struct async_forward
+        class async_forwarder
         {
-            typedef T&& type;
+            T val_;
+
+        public:
+            async_forwarder(T&& t) : val_(std::move(t)) { }
+
+            async_forwarder(async_forwarder const& other) = delete;
+            async_forwarder(async_forwarder&& other)
+                : val_(std::move(other.val_)) { }
+
+            T&       operator * ()       { return val_; }
+            T const& operator * () const { return val_; }
+
+            T*       operator -> ()       { return &val_; }
+            T const* operator -> () const { return &val_; }
         };
 
         template <typename T>
-        struct async_forward<T&>
+        class async_forwarder<T&>
         {
-            typedef T type;
+            T* val_;
+
+        public:
+            async_forwarder(T& t) : val_(&t) { }
+
+            async_forwarder(async_forwarder const& other) = delete;
+            async_forwarder(async_forwarder&& other)
+                : val_(other.val_) { }
+
+            T&       operator * ()       { return *val_; }
+            T const& operator * () const { return *val_; }
+
+            T*       operator -> ()       { return val_; }
+            T const* operator -> () const { return val_; }
         };
 
         //========================================================
@@ -331,18 +354,16 @@ namespace Plumbing
             {
                 std::shared_ptr<Pipe<Output>> pipe(new Pipe<Output>(2)); // TODO make this customizable
 
-                typedef typename detail::async_forward<InputIterable>::type async_type;
-
                 // start processing thread
                 std::thread processingThread(
-                        [pipe, func](async_type input) mutable
+                        [pipe, func](detail::async_forwarder<InputIterable> input) mutable
                         {
-                            for (auto&& e : input) {
+                            for (auto&& e : *input) {
                                 pipe->enqueue(func(e));
                             }
                             pipe->close();
                         },
-                        std::forward<InputIterable>(input)
+                        detail::async_forwarder<InputIterable>(std::forward<InputIterable>(input))
                 );
 
                 processingThread.detach(); // TODO: shouldn't detach?
@@ -361,17 +382,15 @@ namespace Plumbing
             template <typename InputIterable, typename Func>
             static std::future<void> connect(InputIterable&& input, Func func)
             {
-                typedef typename detail::async_forward<InputIterable>::type async_type;
-
                 // start processing thread
                 return std::async(std::launch::async,
-                        [func](async_type input) mutable
+                        [func](detail::async_forwarder<InputIterable> input) mutable
                         {
-                            for (auto&& e : input) {
+                            for (auto&& e : *input) {
                                 func(e);
                             }
                         },
-                        std::forward<InputIterable>(input)
+                        detail::async_forwarder<InputIterable>(std::forward<InputIterable>(input))
                 );
             }
         };
