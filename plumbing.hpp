@@ -267,30 +267,24 @@ namespace Plumbing
             async_forwarder(async_forwarder&& other)
                 : val_(std::move(other.val_)) { }
 
-            T&       operator * ()       { return val_; }
-            T const& operator * () const { return val_; }
-
-            T*       operator -> ()       { return &val_; }
-            T const* operator -> () const { return &val_; }
+            operator T&& ()       { return std::move(val_); }
+            operator T&& () const { return std::move(val_); }
         };
 
         template <typename T>
         class async_forwarder<T&>
         {
-            T* val_;
+            T& val_;
 
         public:
-            async_forwarder(T& t) : val_(&t) { }
+            async_forwarder(T& t) : val_(t) { }
 
             async_forwarder(async_forwarder const& other) = delete;
             async_forwarder(async_forwarder&& other)
                 : val_(other.val_) { }
 
-            T&       operator * ()       { return *val_; }
-            T const& operator * () const { return *val_; }
-
-            T*       operator -> ()       { return val_; }
-            T const* operator -> () const { return val_; }
+            operator T&       ()       { return val_; }
+            operator T const& () const { return val_; }
         };
 
         //========================================================
@@ -356,9 +350,9 @@ namespace Plumbing
 
                 // start processing thread
                 std::thread processingThread(
-                        [pipe, func](detail::async_forwarder<InputIterable> input) mutable
+                        [pipe, func](InputIterable&& input) mutable
                         {
-                            for (auto&& e : *input) {
+                            for (auto&& e : input) {
                                 pipe->enqueue(func(e));
                             }
                             pipe->close();
@@ -384,9 +378,9 @@ namespace Plumbing
             {
                 // start processing thread
                 return std::async(std::launch::async,
-                        [func](detail::async_forwarder<InputIterable> input) mutable
+                        [func](InputIterable&& input) mutable
                         {
-                            for (auto&& e : *input) {
+                            for (auto&& e : input) {
                                 func(e);
                             }
                         },

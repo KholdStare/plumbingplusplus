@@ -273,9 +273,9 @@ std::string accessValueAsync(T&& checker) // checker here will be move_checker
 {
     std::future<std::string> fut =
         std::async(std::launch::async,
-            [](detail::async_forwarder<T> checker) mutable
+            [](T&& checker) mutable
             {
-                return checker->payload[0];
+                return checker.payload[0];
             },
             detail::async_forwarder<T>(std::forward<T>(checker)));
 
@@ -351,7 +351,7 @@ BOOST_AUTO_TEST_CASE( forwarded_lambda_move_async )
     std::string output = accessValueAsync(std::move(copy));
 
     BOOST_CHECK_EQUAL( checker.copies(), 1 );
-    BOOST_CHECK_EQUAL( checker.moves(), 4 );
+    BOOST_CHECK_EQUAL( checker.moves(), 3 );
 
     BOOST_CHECK_EQUAL( output, payloadString);
 }
