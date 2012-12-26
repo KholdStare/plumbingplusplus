@@ -365,6 +365,16 @@ namespace Plumbing
         bool operator != (iterator& other) { return !(*this == other); }
     };
 
+    /**
+     * The Source encapsulates the input into a pipeline. It acts as a thing
+     * functionality wrapper around an iterable, but allows passing of extra
+     * information along with it (like a monad).  It also allows a selective
+     * entry point for the combinators below, like (>>) and connect, so that
+     * the API accepts specific types, and not everything under the sun.
+     */
+    template <typename InputIterable>
+    class Source;
+
     namespace detail
     {
 
@@ -513,7 +523,6 @@ namespace Plumbing
 
     }
 
-    // TODO: make connect a member function of sink
     /**
      * @note need to specialize based on output of the function passed in,
      * so need another layer of indirection to connect_impl.
@@ -528,6 +537,8 @@ namespace Plumbing
                 Func
         >::monadic_type
     {
+
+
         typedef typename detail::connect_traits<
                     typename std::remove_reference<InputIterable>::type::iterator::value_type,
                     Func

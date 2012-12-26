@@ -503,6 +503,35 @@ BOOST_AUTO_TEST_CASE( sink_create )
     BOOST_CHECK_EQUAL( checker.moves(), 0 );
 }
 
+BOOST_AUTO_TEST_CASE( sink_connect )
+{
+    move_checker checker;
+
+    Sink<int> sink = MakeSink(checker);
+
+    auto inc = [](int i) { return i+1; };
+
+    Sink<int> sink2 = connect(sink, inc);
+
+    std::vector<int> results;
+    std::copy(std::begin(sink2), std::end(sink2),
+            std::back_inserter(results));
+
+    std::vector<int> expectedResults;
+    std::transform(std::begin(checker), std::end(checker),
+            std::back_inserter(expectedResults), inc);
+
+    BOOST_CHECK_EQUAL( results.size(), expectedResults.size() );
+    size_t size = results.size();
+    for (size_t i = 0; i < size; ++i)
+    {
+        BOOST_CHECK_EQUAL( results[i], expectedResults[i] );
+    }
+
+    BOOST_CHECK_EQUAL( checker.copies(), 0 );
+    BOOST_CHECK_EQUAL( checker.moves(), 0 );
+}
+
 BOOST_AUTO_TEST_SUITE_END()
 //____________________________________________________________________________//
 
