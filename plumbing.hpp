@@ -74,7 +74,6 @@ namespace Plumbing
             read_ = (read_ + 1) % fifo_.size();
         }
 
-
     public:
         Pipe(std::size_t fifoSize = 2)
             : fifo_(fifoSize),
@@ -115,18 +114,26 @@ namespace Plumbing
          ************************************/
         
         // TODO: make nothrow
-        void enqueue(T const& e)
+        bool enqueue(T const& e)
         {
+            // inexpensive check before acquiring lock
+            if (!open_) { return false; }
+
             std::unique_lock<std::mutex> lock(mutex_);
             while(!writeHeadroom())
             {
                 readyForWrite_.wait(lock);
             }
 
+            // check if we can write again, since it could have changed
+            if (!open_) { return false; }
+
             fifo_[write_] = e;
             incrementWrite();
 
             readyForRead_.notify_one();
+
+            return true;
         }
 
         // TODO: have to look out for trying to enqueue after closing the pipe
@@ -141,16 +148,18 @@ namespace Plumbing
             }
 
             fifo_[write_] = boost::optional<T>(boost::none);
-            incrementWrite();
+            incrementWrite(); // give space to read
 
             readyForRead_.notify_all();
+
+            open_ = false; // hint for write side
         }
 
         /**************************************
          *  Facilities for reading from pipe  *
          **************************************/
         
-        bool isOpen()
+        bool hasNext()
         {
             std::unique_lock<std::mutex> lock(mutex_);
             while(!readHeadroom())
@@ -164,7 +173,7 @@ namespace Plumbing
         // TODO boost::optional should be return type so that the
         // check for open and getting the value is an atomic operation.
         // Currently if two threads try reading from a pipe, both can pass
-        // the isOpen() check, one reads an actual value, while the other
+        // the hasNext() check, one reads an actual value, while the other
         // might try to read when the pipe is already closed.
         T dequeue()
         {
@@ -174,7 +183,6 @@ namespace Plumbing
                 readyForRead_.wait(lock);
             }
 
-            // TODO std::move
             T const& e = *fifo_[read_];
             incrementRead();
 
@@ -276,7 +284,7 @@ namespace Plumbing
 
             bool hasNext()
             {
-                return pipe_->isOpen();
+                return pipe_->hasNext();
             }
 
             value_type next()

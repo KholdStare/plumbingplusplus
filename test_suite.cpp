@@ -28,7 +28,7 @@ BOOST_AUTO_TEST_CASE( empty_pipe )
 {
     Pipe<std::string> pipe;
     std::thread a([&](){ 
-            while (pipe.isOpen())
+            while (pipe.hasNext())
             {
                 std::cout << pipe.dequeue() << std::endl;
             }
@@ -50,7 +50,7 @@ BOOST_AUTO_TEST_CASE( one_element_pipe )
     Pipe<int> pipe;
     std::vector<int> output;
     std::thread a([&](){ 
-            while (pipe.isOpen())
+            while (pipe.hasNext())
             {
                 output.push_back(pipe.dequeue());
             }
@@ -79,7 +79,7 @@ BOOST_AUTO_TEST_CASE( many_element_pipe )
     std::vector<int> input{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
     std::vector<int> output;
     std::thread a([&](){ 
-            while (pipe.isOpen())
+            while (pipe.hasNext())
             {
                 output.push_back(pipe.dequeue());
             }
@@ -111,7 +111,7 @@ BOOST_AUTO_TEST_CASE( larger_capacity_pipe )
     std::vector<int> input{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
     std::vector<int> output;
     std::thread a([&](){ 
-            while (pipe.isOpen())
+            while (pipe.hasNext())
             {
                 output.push_back(pipe.dequeue());
             }
@@ -142,70 +142,6 @@ BOOST_AUTO_TEST_SUITE_END()
 
 BOOST_AUTO_TEST_SUITE(perfect_forwarding)
 
-//char const* payloadString = "Wololo";
-
-/**
- * A helper class to keep track of the number of moves/copies.
- *
- * It can be used to ensure passing of objects does not incur
- * unnecessary/unanticipated copies.
- */
-//class move_checker
-//{
-    //std::shared_ptr<int> copies_;
-    //std::shared_ptr<int> moves_;
-
-//public:
-    //std::vector<std::string> payload; // expensive payload
-
-    //move_checker()
-        //: copies_(new int(0)),
-          //moves_(new int(0)),
-          //payload(1000, std::string(payloadString))
-    //{ }
-
-    //move_checker(move_checker const& other)
-        //: copies_(other.copies_),
-          //moves_(other.moves_),
-          //payload(other.payload)
-    //{
-        //*copies_ += 1;
-    //}
-
-    //move_checker& operator = (move_checker const& other)
-    //{
-        //copies_ = other.copies_;
-        //moves_ = other.moves_;
-        //payload = other.payload;
-
-        //*copies_ += 1;
-
-        //return *this;
-    //}
-
-    //move_checker(move_checker&& other)
-        //: copies_(std::move(other.copies_)),
-          //moves_(std::move(other.moves_)),
-          //payload(std::move(other.payload))
-    //{
-        //*moves_ += 1;
-    //}
-
-    //move_checker& operator = (move_checker&& other)
-    //{
-        //copies_ = std::move(other.copies_);
-        //moves_ = std::move(other.moves_);
-        //payload = std::move(other.payload);
-
-        //*moves_ += 1;
-
-        //return *this;
-    //}
-
-    //int copies() const { return *copies_; }
-    //int moves()  const { return *moves_; }
-//};
- 
 BOOST_AUTO_TEST_CASE( move_checker_init )
 {
     move_checker checker;
