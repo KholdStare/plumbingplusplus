@@ -35,6 +35,8 @@ BOOST_AUTO_TEST_CASE( empty_pipe )
             });
 
     pipe.close();
+    bool result = pipe.enqueue("Shouldn't work");
+    BOOST_CHECK_EQUAL( result, false );
 
 #ifdef __unix  // don't have timeout on other platforms
     BOOST_TEST_CHECKPOINT("Trying to join with thread");
@@ -56,9 +58,11 @@ BOOST_AUTO_TEST_CASE( one_element_pipe )
             }
     });
 
-    pipe.enqueue(THE_ANSWER_TO_LIFE_THE_UNIVERSE_AND_EVERYTHING);
+    BOOST_CHECK_EQUAL( pipe.enqueue(THE_ANSWER_TO_LIFE_THE_UNIVERSE_AND_EVERYTHING), true );
 
     pipe.close();
+    bool result = pipe.enqueue(666);
+    BOOST_CHECK_EQUAL( result, false );
 
 #ifdef __unix  // don't have timeout on other platforms
     BOOST_TEST_CHECKPOINT("Trying to join with thread");
@@ -87,10 +91,12 @@ BOOST_AUTO_TEST_CASE( many_element_pipe )
 
     for (auto&& elem : input)
     {
-        pipe.enqueue(elem);
+        BOOST_CHECK_EQUAL( pipe.enqueue(elem), true );
     }
 
     pipe.close();
+    bool result = pipe.enqueue(666);
+    BOOST_CHECK_EQUAL( result, false );
 
 #ifdef __unix  // don't have timeout on other platforms
     BOOST_TEST_CHECKPOINT("Trying to join with thread");
@@ -119,10 +125,12 @@ BOOST_AUTO_TEST_CASE( larger_capacity_pipe )
 
     for (auto&& elem : input)
     {
-        pipe.enqueue(elem);
+        BOOST_CHECK_EQUAL( pipe.enqueue(elem), true );
     }
 
     pipe.close();
+    bool result = pipe.enqueue(666);
+    BOOST_CHECK_EQUAL( result, false );
 
 #ifdef __unix  // don't have timeout on other platforms
     BOOST_TEST_CHECKPOINT("Trying to join with thread");
@@ -135,6 +143,21 @@ BOOST_AUTO_TEST_CASE( larger_capacity_pipe )
     BOOST_REQUIRE_EQUAL( output.size(), input.size() );
 
     BOOST_CHECK( output == input );
+}
+
+BOOST_AUTO_TEST_CASE( move_through_pipe )
+{
+    move_checker checker;
+
+    Pipe<move_checker> pipe(2);
+    BOOST_CHECK_EQUAL( pipe.enqueue(std::move(checker)), true );
+
+    move_checker newChecker = pipe.dequeue();
+    pipe.close();
+
+    // TODO: would like to minimize copies
+    BOOST_CHECK_EQUAL( checker.copies(), 2 );
+    BOOST_CHECK_EQUAL( checker.moves(), 0 );
 }
 
 BOOST_AUTO_TEST_SUITE_END()

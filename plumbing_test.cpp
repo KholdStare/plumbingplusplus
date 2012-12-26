@@ -12,6 +12,8 @@ void printLine(T elem)
     std::cout << elem << std::endl;
 };
 
+// NOTE: Currently does not work properly because
+// hasNext() and dequeue() do not happend atomically.
 void testSplitting()
 {
     std::vector<int> vals{1,2,3,4,5,6,7,8,9,10};
@@ -21,14 +23,14 @@ void testSplitting()
 
     // both threads are reading from the same pipe
     std::thread a([&](){ 
-        while (pipe.isOpen())
+        while (pipe.hasNext())
         {
             std::cout << "Thread A: " << pipe.dequeue() << std::endl;
         }
     });
 
     std::thread b([&](){ 
-        while (pipe.isOpen())
+        while (pipe.hasNext())
         {
             std::cout << "Thread B: " << pipe.dequeue() << std::endl;
         }
@@ -58,11 +60,11 @@ int main(int argc, char const *argv[])
             });
 
     std::thread b([&](){ 
-            while (pipe.isOpen())
+            while (pipe.hasNext())
             {
                 std::cout << pipe.dequeue() << std::endl;
             }
-            });
+        });
 
     a.join();
 

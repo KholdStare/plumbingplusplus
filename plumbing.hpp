@@ -114,6 +114,11 @@ namespace Plumbing
          ************************************/
         
         // TODO: make nothrow
+        /**
+         * Enqueue a value of type T into the pipe, if possible.
+         *
+         * @return whether the operation succeeded.
+         */
         bool enqueue(T const& e)
         {
             // inexpensive check before acquiring lock
@@ -136,8 +141,6 @@ namespace Plumbing
             return true;
         }
 
-        // TODO: have to look out for trying to enqueue after closing the pipe
-        // perhaps throw exception?
         // TODO: make nothrow
         void close()
         {
