@@ -82,7 +82,7 @@ int main(int argc, char const *argv[])
             return s[0]; // print first character
         };
 
-    ( vals >> getFirstChar >> printLine<char> ).wait();
+    ( MakeSink(vals) >> getFirstChar >> printLine<char> ).wait();
     connect( vals, getFirstChar, printLine<char> ).wait();
     connect( vals, printLine<std::string>).wait();
 
