@@ -682,15 +682,32 @@ namespace Plumbing
         return connect( connect(std::forward<InputIterable>(input), func), func2, funcs... );
     }
 
-    /**
-     * @note: Perhaps this operator is too generically templated, and would "poison"
-     * the code it is imported into?
-     */
     template <typename InputIterable, typename Func>
-    inline auto operator >> (InputIterable&& input, Func func)
-    -> decltype(connect(std::forward<InputIterable>(input), func))
+    inline auto operator >> (Source<InputIterable>&& input, Func func)
+    -> decltype(connect(std::move(input), func))
     {
-        return connect(std::forward<InputIterable>(input), func);
+        return connect(std::move(input), func);
+    }
+
+    template <typename InputIterable, typename Func>
+    inline auto operator >> (Source<InputIterable>& input, Func func)
+    -> decltype(connect(input, func))
+    {
+        return connect(input, func);
+    }
+
+    template <typename T, typename Func>
+    inline auto operator >> (Sink<T>&& input, Func func)
+    -> decltype(connect(std::move(input), func))
+    {
+        return connect(std::move(input), func);
+    }
+
+    template <typename T, typename Func>
+    inline auto operator >> (Sink<T>& input, Func func)
+    -> decltype(connect(input, func))
+    {
+        return connect(input, func);
     }
 
     // TODO: enforce const& for func, so callable objects passed in do not
