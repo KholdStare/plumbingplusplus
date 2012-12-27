@@ -1,6 +1,9 @@
 // This code is put in the public domain by Andrei Alexandrescu
 // See http://www.reddit.com/r/programming/comments/14m1tc/andrei_alexandrescu_systematic_error_handling_in/c7etk47
 
+#ifndef EXPECTED_HPP_TN6DJT51
+#define EXPECTED_HPP_TN6DJT51
+
 #include <stdexcept>
 #include <algorithm>
 
@@ -115,3 +118,4 @@ public:
   }
 };
 
+#endif /* end of include guard: EXPECTED_HPP_TN6DJT51 */
