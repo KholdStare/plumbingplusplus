@@ -249,6 +249,9 @@ namespace Plumbing
         }
     };
 
+    /**
+     * Encapsulates the output of a Pipe<Expected<T>>
+     */
     template <typename T>
     class Sink
     {
@@ -258,7 +261,7 @@ namespace Plumbing
         typedef std::shared_ptr<Pipe<value_type>> pipe_type;
         typedef value_type* pointer;
         typedef value_type& reference;
-        typedef Sink<T> iterator;
+        typedef Sink<T> const_iterator;
         typedef std::input_iterator_tag iterator_category;
         typedef void difference_type;
 
@@ -280,19 +283,21 @@ namespace Plumbing
          */
         Sink() : pipe_(nullptr) { }
 
-        iterator& begin() { return *this; }
-        iterator  end()   { return iterator(); }
+        const_iterator& begin() { return *this; }
+        const_iterator  end()   { return const_iterator(); }
+        const_iterator& cbegin() { return *this; }
+        const_iterator  cend()   { return const_iterator(); }
 
-        iterator& operator ++ ()    { return *this; } ///< noop
-        iterator& operator ++ (int) { return *this; } ///< noop
+        const_iterator& operator ++ ()    { return *this; } ///< noop
+        const_iterator& operator ++ (int) { return *this; } ///< noop
 
         /**
-         * To fullfil the input_iterator category, both returns the 
-         * the next element and advances the inner iterator
+         * To fullfil the input_const_iterator category, both returns the 
+         * the next element and advances the inner const_iterator
          */
         value_type operator * ()    { return pipe_->dequeue(); }
 
-        bool operator == (iterator& other)
+        bool operator == (const_iterator const& other) const
         {
             Pipe<value_type>* a = this->pipe_.get();
             Pipe<value_type>* b = other.pipe_.get();
@@ -310,18 +315,54 @@ namespace Plumbing
             // a is surely not null at this point.
             assert(a);
 
-            // an "end" iterator is:
-            // - either the default constructed iterator (pipe_ is nullptr)
+            // an "end" const_iterator is:
+            // - either the default constructed const_iterator (pipe_ is nullptr)
             // - or has reached the end of iteration (hasNext() returns false)
             return !(b || a->hasNext());
         }
 
-        bool operator != (iterator& other) { return !(*this == other); }
+        bool operator != (const_iterator& other) { return !(*this == other); }
 
         void close() { pipe_->forceClose(); }
 
     private:
         pipe_type pipe_;
+    };
+
+
+    template <typename InputIterable> class ISource;
+
+    template <typename InputIterable>
+    class ISource
+    {
+        typedef InputIterable wrapped_type;
+        typedef typename wrapped_type::const_iterator const_iterator;
+        typedef typename const_iterator::value_type value_type;
+
+        const_iterator current;
+        const_iterator end;
+
+    public:
+        /**
+         * Construct ISource from an InputIterable lvalue.
+         */
+        ISource(wrapped_type& iterable)
+            : current(iterable.begin()),
+              end(iterable.end())
+        { }
+
+
+        // need 3 methods
+        bool hasNext() noexcept // TODO: const?
+        {
+            return current != end;
+        }
+
+        value_type next() {
+            return *current++;
+        }
+        
+        void close() const { } // noop
     };
 
     // TODO: create a "Source" class to encapsulate an input to a pipe, so ">>"
@@ -508,14 +549,14 @@ namespace Plumbing
     template <typename InputIterable, typename Func>
     auto connect(InputIterable&& input, Func func)
     ->  typename detail::connect_traits<
-                typename std::remove_reference<InputIterable>::type::iterator::value_type,
+                typename std::remove_reference<InputIterable>::type::const_iterator::value_type,
                 Func
         >::monadic_type
     {
 
 
         typedef typename detail::connect_traits<
-                    typename std::remove_reference<InputIterable>::type::iterator::value_type,
+                    typename std::remove_reference<InputIterable>::type::const_iterator::value_type,
                     Func
                 >::return_type return_type;
 
@@ -526,14 +567,14 @@ namespace Plumbing
     template <typename InputIterable, typename Func, typename Func2, typename... Funcs>
     auto connect(InputIterable&& input, Func func, Func2 func2, Funcs... funcs)
     ->  typename detail::connect_traits<
-            typename std::remove_reference<InputIterable>::type::iterator::value_type,
+            typename std::remove_reference<InputIterable>::type::const_iterator::value_type,
             Func,
             Func2,
             Funcs...
         >::monadic_type
     {
         typedef typename detail::connect_traits<
-                    typename std::remove_reference<InputIterable>::type::iterator::value_type,
+                    typename std::remove_reference<InputIterable>::type::const_iterator::value_type,
                     Func
                 >::return_type return_type;
 
