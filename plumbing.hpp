@@ -8,6 +8,8 @@
 
 #include <cassert>
 
+#include "expected.hpp"
+
 #include <vector>
 #include <mutex>
 #include <condition_variable>
@@ -247,147 +249,36 @@ namespace Plumbing
         }
     };
 
-    // Sink details
-    namespace detail
-    {
-
-        template <typename InputIterable>
-        struct sink_traits
-        {
-            typedef InputIterable type;
-            typedef typename InputIterable::iterator iterator;
-            typedef typename std::iterator_traits<iterator>::value_type value_type;
-        };
-
-        template <typename T>
-        class SinkImplBase
-        {
-        public:
-            typedef T value_type;
-
-            virtual ~SinkImplBase () { }
-
-            virtual bool hasNext() = 0;
-            virtual T next() = 0;
-        
-        };
-
-        /**
-         * @note: InputIterable means has .begin() and .end()
-         * that return InputIterator
-         */
-        template <typename InputIterable>
-        class SinkImpl : public SinkImplBase<typename sink_traits<InputIterable>::value_type>
-        {
-            typedef SinkImpl<InputIterable> type;
-            typedef typename sink_traits<InputIterable>::iterator iterator;
-            typedef typename sink_traits<InputIterable>::value_type value_type;
-            iterator current_;
-            iterator end_;
-
-        public:
-
-            SinkImpl(InputIterable& iterable)
-                : current_(iterable.begin()),
-                  end_(iterable.end())
-            { }
-
-            ~SinkImpl() { }
-
-            bool hasNext()
-            {
-                return current_ != end_;
-            }
-
-            value_type next()
-            {
-                return *current_++;
-            }
-        };
-
-        /**
-         * Template specialization of sink_traits for Pipes
-         */
-        template <>
-        template <typename T>
-        struct sink_traits< std::shared_ptr<Pipe<T>> >
-        {
-            typedef std::shared_ptr<Pipe<T>> type;
-            typedef void iterator;
-            typedef T value_type;
-        };
-
-        /**
-         * Template specialization for Pipes
-         */
-        template <>
-        template <typename T>
-        class SinkImpl<std::shared_ptr<Pipe<T>>> : public SinkImplBase<T>
-        {
-            typedef std::shared_ptr<Pipe<T>> pipe_type;
-            typedef SinkImpl<pipe_type> type;
-            typedef T value_type;
-            pipe_type pipe_;
-
-        public:
-
-            SinkImpl(pipe_type const& pipe)
-                : pipe_(pipe)
-            { }
-
-            ~SinkImpl() { }
-
-            bool hasNext()
-            {
-                return pipe_->hasNext();
-            }
-
-            value_type next()
-            {
-                return pipe_->dequeue();
-            }
-        };
-    }
-
     template <typename T>
     class Sink
     {
-        std::shared_ptr<detail::SinkImplBase<T>> pimpl;
-
     public:
+        //typedef Expected<T> value_type;
         typedef T value_type;
-        typedef T* pointer;
-        typedef T& reference;
+        typedef std::shared_ptr<Pipe<value_type>> pipe_type;
+        typedef value_type* pointer;
+        typedef value_type& reference;
         typedef Sink<T> iterator;
         typedef std::input_iterator_tag iterator_category;
         typedef void difference_type;
 
         Sink(Sink<T> const& other) = default;
-        Sink(Sink<T>&& other) = default;
+        Sink(Sink<T>&& other)
+            : pipe_(std::move(other.pipe_))
+        { }
 
-        /**
-         * Main constructor that uses type erasure to encapsulate an iterable
-         * object, with a single type of iterator.
-         *
-         * @note use std::enable_if and SFINAE to disable the constructor
-         * for itself, otherwise this constructor gets interpreted as the copy
-         * constructor, and we get into an infinite loop of creating a new Sink
-         * from itself.
-         */
-        template <
-            typename InputIterable,
-            typename std::enable_if<
-                !std::is_same<InputIterable, Sink<T>>::value, int
-            >::type = 0
-        >
-        Sink(InputIterable& iterable)
-            : pimpl(new detail::SinkImpl<InputIterable>(iterable))
+        Sink(pipe_type const& pipe)
+            : pipe_(pipe)
+        { }
+
+        Sink(pipe_type&& pipe)
+            : pipe_(std::move(pipe))
         { }
 
         /**
          * Default constructor, creates an "end" iterator
          */
-        Sink() : pimpl(nullptr) { }
+        Sink() : pipe_(nullptr) { }
 
         iterator& begin() { return *this; }
         iterator  end()   { return iterator(); }
@@ -399,12 +290,12 @@ namespace Plumbing
          * To fullfil the input_iterator category, both returns the 
          * the next element and advances the inner iterator
          */
-        value_type operator * ()    { return pimpl->next(); }
+        value_type operator * ()    { return pipe_->dequeue(); }
 
         bool operator == (iterator& other)
         {
-            detail::SinkImplBase<T>* a = this->pimpl.get();
-            detail::SinkImplBase<T>* b = other.pimpl.get();
+            Pipe<T>* a = this->pipe_.get();
+            Pipe<T>* b = other.pipe_.get();
             
             if (a == b)
             {
@@ -420,14 +311,21 @@ namespace Plumbing
             assert(a);
 
             // an "end" iterator is:
-            // - either the default constructed iterator (pimpl is nullptr)
+            // - either the default constructed iterator (pipe_ is nullptr)
             // - or has reached the end of iteration (hasNext() returns false)
             return !(b || a->hasNext());
         }
 
         bool operator != (iterator& other) { return !(*this == other); }
+
+        void close() { pipe_->forceClose(); }
+
+    private:
+        pipe_type pipe_;
     };
 
+    // TODO: create a "Source" class to encapsulate an input to a pipe, so ">>"
+    // can be used safely
     /**
      * The Source encapsulates the input into a pipeline. It acts as a thing
      * functionality wrapper around an iterable, but allows passing of extra
@@ -632,29 +530,11 @@ namespace Plumbing
      * @note: Perhaps this operator is too generically templated, and would "poison"
      * the code it is imported into?
      */
-    template <typename In, typename Func>
-    inline auto operator >> (Sink<In>& input, Func func)
-    -> decltype(connect(input, func))
+    template <typename InputIterable, typename Func>
+    inline auto operator >> (InputIterable&& input, Func func)
+    -> decltype(connect(std::forward<InputIterable>(input), func))
     {
-        return connect(input, func);
-    }
-
-    template <typename In, typename Func>
-    inline auto operator >> (Sink<In>&& input, Func func)
-    -> decltype(connect(std::move(input), func))
-    {
-        return connect(std::move(input), func);
-    }
-
-    template <typename InputIterable>
-    Sink<typename detail::sink_traits<typename std::remove_reference<InputIterable>::type>::value_type>
-    MakeSink(InputIterable&& iterable)
-    {
-        return Sink<
-            typename detail::sink_traits<
-                typename std::remove_reference<InputIterable>::type
-            >::value_type
-        >(iterable);
+        return connect(std::forward<InputIterable>(input), func);
     }
 
     // TODO: enforce const& for func, so callable objects passed in do not
@@ -667,9 +547,6 @@ namespace Plumbing
     // are instantiated as necessary
     // Haskell's >>= ?
     
-    // TODO: create a "Pump" class to encapsulate an input to a pipe, so ">>"
-    // can be used safely
-
 }
 
 #endif /* end of include guard: PLUMBING_H_IEGJRLCP */
