@@ -257,7 +257,6 @@ namespace Plumbing
     {
     public:
         typedef Expected<T> value_type;
-        //typedef T value_type;
         typedef std::shared_ptr<Pipe<value_type>> pipe_type;
         typedef value_type* pointer;
         typedef value_type& reference;
@@ -335,25 +334,33 @@ namespace Plumbing
     template <typename InputIterable>
     class ISource
     {
+    public:
         typedef InputIterable wrapped_type;
         typedef typename wrapped_type::const_iterator const_iterator;
         typedef typename const_iterator::value_type value_type;
 
-        const_iterator current;
-        const_iterator end;
-
-    public:
         /**
          * Construct ISource from an InputIterable lvalue.
          */
-        ISource(wrapped_type& iterable)
+        ISource(wrapped_type const& iterable)
             : current(iterable.begin()),
               end(iterable.end())
         { }
 
+        // TODO: put static assert in rvalue constructor
+        //ISource(wrapped_type&& iterable)
+            //: current(iterable.begin()),
+              //end(iterable.end())
+        //{ 
+            //static_assert(false, "Cannot create generic ISource from an rvalue InputIterable.");
+        //}
+
+        // default constructors
+        ISource(ISource const& other) = default;
+        ISource(ISource&& other) = default;
 
         // need 3 methods
-        bool hasNext() noexcept // TODO: const?
+        bool hasNext() const noexcept 
         {
             return current != end;
         }
@@ -363,6 +370,11 @@ namespace Plumbing
         }
         
         void close() const { } // noop
+
+    private:
+
+        const_iterator current;
+        const_iterator end;
     };
 
     // TODO: create a "Source" class to encapsulate an input to a pipe, so ">>"
@@ -375,6 +387,95 @@ namespace Plumbing
      * the API accepts specific types, and not everything under the sun.
      */
     template <typename InputIterable> class Source;
+
+    template <typename InputIterable>
+    class Source
+    {
+        typedef InputIterable wrapped_type;
+
+        boost::optional<ISource<InputIterable>> impl_;
+
+    public:
+        typedef Source<wrapped_type> const_iterator;
+        typedef typename ISource<wrapped_type>::value_type value_type;
+        typedef value_type* pointer;
+        typedef value_type& reference;
+        typedef std::input_iterator_tag iterator_category;
+        typedef void difference_type;
+
+        Source()
+            : impl_()
+        { }
+
+        Source(Source const& other)
+            : impl_(other.impl_)
+        { }
+
+        Source(Source&& other)
+            : impl_(std::move(other.impl_))
+        { }
+
+        Source(InputIterable& iterable)
+            : impl_(iterable)
+        { }
+
+        Source(InputIterable&& iterable)
+            : impl_(std::move(iterable))
+        { }
+
+        // TODO: make static const end iterator
+
+        const_iterator& begin() { return *this; }
+        const_iterator  end()   { return const_iterator(); }
+        const_iterator& cbegin() { return *this; }
+        const_iterator  cend()   { return const_iterator(); }
+
+        const_iterator& operator ++ ()    { return *this; } ///< noop
+        const_iterator& operator ++ (int) { return *this; } ///< noop
+
+        /**
+         * To fullfil the input_const_iterator category, both returns the 
+         * the next element and advances the inner const_iterator
+         */
+        value_type operator * ()    { return impl_->next(); }
+
+        bool operator == (const_iterator const& other) const
+        {
+            if (this == &other)
+            {
+                return true;
+            }
+
+            auto* a = &this->impl_;
+            auto* b = &other.impl_;
+
+            if (!(*a))
+            {
+                std::swap(a, b);
+            }
+        
+            // a is surely not empty at this point
+            assert(!!(*a));
+
+            // an "end" const_iterator is:
+            // - either the default constructed const_iterator (optional is empty)
+            // - or has reached the end of iteration (hasNext() returns false)
+            return (!(*b)) && !(*a)->hasNext();
+        }
+
+        bool operator != (const_iterator const& other) const { return !(*this == other); }
+
+        // TODO: ?
+        ISource<wrapped_type>& impl() { return impl_; }
+
+    };
+
+    template <typename InputIterable>
+    Source<typename std::remove_reference<InputIterable>::type>
+    makeSource(InputIterable&& iterable)
+    {
+        return Source<typename std::remove_reference<InputIterable>::type>(iterable);
+    }
 
     namespace detail
     {
