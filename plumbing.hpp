@@ -334,8 +334,9 @@ namespace Plumbing
     template <typename InputIterable>
     class ISource
     {
-    public:
         typedef InputIterable wrapped_type;
+
+    public:
         typedef typename wrapped_type::const_iterator const_iterator;
         typedef typename const_iterator::value_type value_type;
 
@@ -375,6 +376,47 @@ namespace Plumbing
 
         const_iterator current;
         const_iterator end;
+    };
+
+    /**
+     * Specialization for Pipe T
+     */
+    template <typename T>
+    class ISource< std::shared_ptr<Pipe<T>> >
+    {
+        
+    public:
+        typedef T value_type;
+        typedef std::shared_ptr<Pipe<value_type>> pipe_type;
+
+        ISource(pipe_type const& pipe)
+            : pipe_(pipe)
+        { }
+
+        ISource(pipe_type&& pipe)
+            : pipe_(std::move(pipe))
+        { }
+
+        // default constructors
+        ISource(ISource const& other) = default;
+        ISource(ISource&& other) = default;
+
+        bool hasNext() const noexcept 
+        {
+            return pipe_->hasNext();
+        }
+
+        value_type next() {
+            return pipe_->dequeue();
+        }
+        
+        void close() const {
+            pipe_->forceClose();
+        }
+
+    private:
+
+        pipe_type pipe_;
     };
 
     // TODO: create a "Source" class to encapsulate an input to a pipe, so ">>"
@@ -466,7 +508,7 @@ namespace Plumbing
         bool operator != (const_iterator const& other) const { return !(*this == other); }
 
         // TODO: ?
-        ISource<wrapped_type>& impl() { return impl_; }
+        ISource<wrapped_type>& impl() { return *impl_; }
 
     };
 

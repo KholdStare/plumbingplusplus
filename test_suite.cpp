@@ -575,6 +575,21 @@ BOOST_AUTO_TEST_CASE( sink_connect )
     BOOST_CHECK_EQUAL( checker.moves(), 0 );
 }
 
+BOOST_AUTO_TEST_CASE( source_from_pipe )
+{
+    move_checker checker;
+
+    auto sharedPipe = std::make_shared<Pipe<move_checker>>();
+    Source<std::shared_ptr<Pipe<move_checker>>> source = makeSource(sharedPipe);
+
+    sharedPipe->enqueue(std::move(checker));
+
+    move_checker result = source.impl().next();
+
+    BOOST_CHECK_EQUAL( checker.copies(), 2 );
+    BOOST_CHECK_EQUAL( checker.moves(), 0 );
+}
+
 BOOST_AUTO_TEST_SUITE_END()
 //____________________________________________________________________________//
 
