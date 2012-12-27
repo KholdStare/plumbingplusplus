@@ -128,11 +128,12 @@ namespace Plumbing
             while(!writeHeadroom())
             {
                 readyForWrite_.wait(lock);
+                // check if we can write again,
+                // since it could have changed
+                if (!open_) { return false; }
             }
 
-            // check if we can write again, since it could have changed
-            if (!open_) { return false; }
-
+            // perform actual write
             fifo_[write_] = e;
             incrementWrite();
 
@@ -142,18 +143,39 @@ namespace Plumbing
         }
 
         // TODO: make nothrow
+        /**
+         * Closes the pipe for writing.
+         *
+         * The read side will attempt to read any remaining values in the pipe.
+         *
+         * @note: could deadlock from read side:
+         *       - no space to write, because read side not clear.
+         *       - read side tries to close, when there is no space to write
+         *
+         * @note: DO NOT USE FROM read side. Use forceClose() instead, if you
+         * do not intend to read any more, and are "abandoning ship".
+         */
         void close()
         {
+            if (!open_) {
+                return;
+            } // noop if already closed
+
             std::unique_lock<std::mutex> lock(mutex_);
             while(!writeHeadroom())
             {
                 readyForWrite_.wait(lock);
+                // noop if already closed
+                if (!open_) { return; } 
             }
 
+            // perform actual write
             fifo_[write_] = boost::optional<T>(boost::none);
             incrementWrite(); // give space to read
 
             readyForRead_.notify_all();
+            // also notify writers, as they cannot write anymore
+            readyForWrite_.notify_all(); 
 
             open_ = false; // hint for write side
         }
@@ -162,6 +184,9 @@ namespace Plumbing
          *  Facilities for reading from pipe  *
          **************************************/
         
+        /**
+         * @return whether values are available for reading from the pipe.
+         */
         bool hasNext()
         {
             std::unique_lock<std::mutex> lock(mutex_);
@@ -171,6 +196,33 @@ namespace Plumbing
             }
 
             return fifo_[read_];
+        }
+
+        /**
+         * Close the pipe, ignoring write headroom.
+         *
+         * This means that READS COULD BE CORRUPTED. Use only if there is no
+         * point in continuing reading from this pipe (e.g. exception occurred
+         * in context, so we abandon ship).
+         *
+         * To summarize: only use from read side in case of an "emergency".
+         */
+        void forceClose()
+        {
+            if (!open_) {
+                return;
+            } // noop if already closed
+
+            std::unique_lock<std::mutex> lock(mutex_);
+
+            fifo_[write_] = boost::optional<T>(boost::none);
+            incrementWrite(); // give space to read
+
+            readyForRead_.notify_all();
+            // also notify writers, as they cannot write anymore
+            readyForWrite_.notify_all(); 
+
+            open_ = false;
         }
 
         // TODO boost::optional should be return type so that the

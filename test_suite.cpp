@@ -15,6 +15,11 @@
 #include "move_checker.hpp"
 #include "expected.hpp"
 
+#ifdef __unix  // don't have timeout on other platforms
+#define TIMEOUT_CHECKPOINT(text) BOOST_TEST_CHECKPOINT(text)
+#else
+#define TIMEOUT_CHECKPOINT(text) BOOST_TEST_MESSAGE( "Timeout support is not implemented on your platform" )
+#endif
 
 using namespace Plumbing;
 
@@ -38,11 +43,7 @@ BOOST_AUTO_TEST_CASE( empty_pipe )
     bool result = pipe.enqueue("Shouldn't work");
     BOOST_CHECK_EQUAL( result, false );
 
-#ifdef __unix  // don't have timeout on other platforms
-    BOOST_TEST_CHECKPOINT("Trying to join with thread");
-#else
-    BOOST_TEST_MESSAGE( "Timeout support is not implemented on your platform" );
-#endif
+    TIMEOUT_CHECKPOINT("Trying to join with thread");
 
     a.join();
 }
@@ -64,11 +65,7 @@ BOOST_AUTO_TEST_CASE( one_element_pipe )
     bool result = pipe.enqueue(666);
     BOOST_CHECK_EQUAL( result, false );
 
-#ifdef __unix  // don't have timeout on other platforms
-    BOOST_TEST_CHECKPOINT("Trying to join with thread");
-#else
-    BOOST_TEST_MESSAGE( "Timeout support is not implemented on your platform" );
-#endif
+    TIMEOUT_CHECKPOINT("Trying to join with thread");
 
     a.join();
 
@@ -98,11 +95,7 @@ BOOST_AUTO_TEST_CASE( many_element_pipe )
     bool result = pipe.enqueue(666);
     BOOST_CHECK_EQUAL( result, false );
 
-#ifdef __unix  // don't have timeout on other platforms
-    BOOST_TEST_CHECKPOINT("Trying to join with thread");
-#else
-    BOOST_TEST_MESSAGE( "Timeout support is not implemented on your platform" );
-#endif
+    TIMEOUT_CHECKPOINT("Trying to join with thread");
 
     a.join();
 
@@ -132,17 +125,44 @@ BOOST_AUTO_TEST_CASE( larger_capacity_pipe )
     bool result = pipe.enqueue(666);
     BOOST_CHECK_EQUAL( result, false );
 
-#ifdef __unix  // don't have timeout on other platforms
-    BOOST_TEST_CHECKPOINT("Trying to join with thread");
-#else
-    BOOST_TEST_MESSAGE( "Timeout support is not implemented on your platform" );
-#endif
+    TIMEOUT_CHECKPOINT("Trying to join with thread");
 
     a.join();
 
     BOOST_REQUIRE_EQUAL( output.size(), input.size() );
 
     BOOST_CHECK( output == input );
+}
+
+BOOST_AUTO_TEST_CASE( double_close )
+{
+    Pipe<int> pipe;
+    std::vector<int> output;
+
+    std::thread a([&](){ 
+            while (pipe.hasNext())
+            {
+                output.push_back(pipe.dequeue());
+            }
+    });
+
+    BOOST_CHECK_EQUAL( pipe.enqueue(THE_ANSWER_TO_LIFE_THE_UNIVERSE_AND_EVERYTHING), true );
+
+    pipe.close();
+    bool result = pipe.enqueue(666);
+    BOOST_CHECK_EQUAL( result, false );
+
+    TIMEOUT_CHECKPOINT("Trying to close pipe a second time");
+
+    pipe.close();
+
+    TIMEOUT_CHECKPOINT("Trying to join with thread");
+
+    a.join();
+
+    BOOST_REQUIRE_EQUAL( output.size(), 1 );
+
+    BOOST_CHECK_EQUAL( output[0], THE_ANSWER_TO_LIFE_THE_UNIVERSE_AND_EVERYTHING );
 }
 
 BOOST_AUTO_TEST_CASE( move_through_pipe )
@@ -158,6 +178,69 @@ BOOST_AUTO_TEST_CASE( move_through_pipe )
     // TODO: would like to minimize copies
     BOOST_CHECK_EQUAL( checker.copies(), 2 );
     BOOST_CHECK_EQUAL( checker.moves(), 0 );
+}
+
+/**
+ * Test whether closing from the READ side prematurely,
+ * works as expected
+ */
+BOOST_AUTO_TEST_CASE( premature_closing )
+{
+    Pipe<int> pipe;
+    std::vector<int> input{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    std::vector<int> output;
+    static const size_t limit = 3;
+
+    std::thread a([&](){ 
+            for (size_t i = 0; i < limit && pipe.hasNext(); ++i)
+            {
+                output.push_back(pipe.dequeue());
+            }
+            pipe.forceClose(); // close from read side!
+    });
+
+    for (auto&& elem : input)
+    {
+        // can fail enqueueing!
+        if (!pipe.enqueue(elem))
+        {
+            break;
+        }
+    }
+
+    pipe.close();
+    bool result = pipe.enqueue(666);
+    BOOST_CHECK_EQUAL( result, false );
+
+    TIMEOUT_CHECKPOINT("Trying to join with thread");
+
+    a.join();
+
+    BOOST_REQUIRE_EQUAL( output.size(), limit );
+}
+
+/**
+ * Test whether closing from the READ side when the 
+ * write side is full works.
+ */
+BOOST_AUTO_TEST_CASE( read_closing_when_full )
+{
+    Pipe<int> pipe(3);
+    std::vector<int> input{1, 2};
+
+    TIMEOUT_CHECKPOINT("Trying to enqueue with no reads");
+
+    for (auto&& elem : input)
+    {
+        BOOST_CHECK_EQUAL( pipe.enqueue(elem), true );
+    }
+
+
+    TIMEOUT_CHECKPOINT("Trying to force close when pipe full");
+
+    pipe.forceClose();
+    bool result = pipe.enqueue(666);
+    BOOST_CHECK_EQUAL( result, false );
 }
 
 BOOST_AUTO_TEST_SUITE_END()
@@ -548,6 +631,26 @@ BOOST_AUTO_TEST_CASE( move_test )
     BOOST_CHECK_EQUAL( true, e2.valid() );
     BOOST_CHECK_EQUAL( checker.copies(), 1 );
     BOOST_CHECK_EQUAL( checker.moves(), 1 );
+}
+
+BOOST_AUTO_TEST_CASE( pipe_test )
+{
+    move_checker checker;
+
+    Expected<move_checker> e(std::move(checker));
+
+    BOOST_CHECK_EQUAL( true, e.valid() );
+    BOOST_CHECK_EQUAL( checker.copies(), 0 );
+    BOOST_CHECK_EQUAL( checker.moves(), 1 );
+
+    Pipe<Expected<move_checker>> pipe(3);
+    BOOST_CHECK_EQUAL( true, pipe.enqueue(e) );
+
+    e = pipe.dequeue();
+
+    BOOST_CHECK_EQUAL( true, e.valid() );
+    BOOST_CHECK_EQUAL( checker.copies(), 2 );
+    BOOST_CHECK_EQUAL( checker.moves(), 4 );
 }
 
 BOOST_AUTO_TEST_SUITE_END()
