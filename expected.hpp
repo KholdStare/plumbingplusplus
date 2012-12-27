@@ -88,10 +88,19 @@ public:
     return gotHam;
   }
 
+  /**
+   * implicit conversion may throw if spam
+   */
+  operator T&() {
+    if (!gotHam) std::rethrow_exception(spam);
+    return ham;
+  }
+
   T& get() {
     if (!gotHam) std::rethrow_exception(spam);
     return ham;
   }
+
   const T& get() const {
     if (!gotHam) std::rethrow_exception(spam);
     return ham;

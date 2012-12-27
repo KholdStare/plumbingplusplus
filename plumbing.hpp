@@ -121,7 +121,7 @@ namespace Plumbing
          *
          * @return whether the operation succeeded.
          */
-        bool enqueue(T const& e)
+        bool enqueue(T const& e) noexcept
         {
             // inexpensive check before acquiring lock
             if (!open_) { return false; }
@@ -157,7 +157,7 @@ namespace Plumbing
          * @note: DO NOT USE FROM read side. Use forceClose() instead, if you
          * do not intend to read any more, and are "abandoning ship".
          */
-        void close()
+        void close() noexcept
         {
             if (!open_) {
                 return;
@@ -209,7 +209,7 @@ namespace Plumbing
          *
          * To summarize: only use from read side in case of an "emergency".
          */
-        void forceClose()
+        void forceClose() noexcept
         {
             if (!open_) {
                 return;
@@ -253,8 +253,8 @@ namespace Plumbing
     class Sink
     {
     public:
-        //typedef Expected<T> value_type;
-        typedef T value_type;
+        typedef Expected<T> value_type;
+        //typedef T value_type;
         typedef std::shared_ptr<Pipe<value_type>> pipe_type;
         typedef value_type* pointer;
         typedef value_type& reference;
@@ -294,8 +294,8 @@ namespace Plumbing
 
         bool operator == (iterator& other)
         {
-            Pipe<T>* a = this->pipe_.get();
-            Pipe<T>* b = other.pipe_.get();
+            Pipe<value_type>* a = this->pipe_.get();
+            Pipe<value_type>* b = other.pipe_.get();
             
             if (a == b)
             {
@@ -333,8 +333,7 @@ namespace Plumbing
      * entry point for the combinators below, like (>>) and connect, so that
      * the API accepts specific types, and not everything under the sun.
      */
-    template <typename InputIterable>
-    class Source;
+    template <typename InputIterable> class Source;
 
     namespace detail
     {
@@ -437,20 +436,35 @@ namespace Plumbing
         {
 
             template <typename InputIterable, typename Func>
-            static Sink<Output> connect(InputIterable&& input, Func func, size_t capacity = 3)
+            static Sink<Output> connect(InputIterable&& source, Func func, size_t capacity = 3)
             {
-                std::shared_ptr<Pipe<Output>> pipe(new Pipe<Output>(capacity));
+                auto pipe = std::make_shared<Pipe<Expected<Output>>>(capacity);
 
                 // start processing thread
                 std::thread processingThread(
-                        [pipe, func](InputIterable&& input) mutable
+                        [pipe, func](InputIterable&& source) mutable
                         {
-                            for (auto&& e : input) {
+                            for (auto&& e : source) {
                                 pipe->enqueue(func(e));
                             }
                             pipe->close();
+                            //while (source.hasNext())
+                            //{
+                                //// TODO: use scope guard
+                                //try {
+                                    //if ( pipe->enqueue(func(source.dequeue())) )
+                                    //{
+                                        //break;
+                                    //}
+                                //}
+                                //catch (...) {
+                                    //pipe->enqueue(Expected<Output>::fromException());
+                                    //source->close();
+                                //}
+                            //}
+                            //pipe->close();
                         },
-                        detail::async_forwarder<InputIterable>(std::forward<InputIterable>(input))
+                        detail::async_forwarder<InputIterable>(std::forward<InputIterable>(source))
                 );
 
                 processingThread.detach(); // TODO: shouldn't detach?
