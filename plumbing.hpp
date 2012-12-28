@@ -249,85 +249,7 @@ namespace Plumbing
         }
     };
 
-    /**
-     * Encapsulates the output of a Pipe<Expected<T>>
-     */
-    template <typename T>
-    class Sink
-    {
-    public:
-        typedef Expected<T> value_type;
-        typedef std::shared_ptr<Pipe<value_type>> pipe_type;
-        typedef value_type* pointer;
-        typedef value_type& reference;
-        typedef Sink<T> const_iterator;
-        typedef std::input_iterator_tag iterator_category;
-        typedef void difference_type;
-
-        Sink(Sink<T> const& other) = default;
-        Sink(Sink<T>&& other)
-            : pipe_(std::move(other.pipe_))
-        { }
-
-        Sink(pipe_type const& pipe)
-            : pipe_(pipe)
-        { }
-
-        Sink(pipe_type&& pipe)
-            : pipe_(std::move(pipe))
-        { }
-
-        /**
-         * Default constructor, creates an "end" iterator
-         */
-        Sink() : pipe_(nullptr) { }
-
-        const_iterator& begin() { return *this; }
-        const_iterator  end()   { return const_iterator(); }
-        const_iterator& cbegin() { return *this; }
-        const_iterator  cend()   { return const_iterator(); }
-
-        const_iterator& operator ++ ()    { return *this; } ///< noop
-        const_iterator& operator ++ (int) { return *this; } ///< noop
-
-        /**
-         * To fullfil the input_const_iterator category, both returns the 
-         * the next element and advances the inner const_iterator
-         */
-        value_type operator * ()    { return pipe_->dequeue(); }
-
-        bool operator == (const_iterator const& other) const
-        {
-            Pipe<value_type>* a = this->pipe_.get();
-            Pipe<value_type>* b = other.pipe_.get();
-            
-            if (a == b)
-            {
-                return true;
-            }
-
-            if (!a)
-            {
-                std::swap(a, b);
-            }
-        
-            // a is surely not null at this point.
-            assert(a);
-
-            // an "end" const_iterator is:
-            // - either the default constructed const_iterator (pipe_ is nullptr)
-            // - or has reached the end of iteration (hasNext() returns false)
-            return !(b || a->hasNext());
-        }
-
-        bool operator != (const_iterator& other) { return !(*this == other); }
-
-        void close() { pipe_->forceClose(); }
-
-    private:
-        pipe_type pipe_;
-    };
-
+    //========================================================
 
     template <typename InputIterable> class ISource;
 
@@ -348,13 +270,8 @@ namespace Plumbing
               end(iterable.end())
         { }
 
-        // TODO: put static assert in rvalue constructor
-        //ISource(wrapped_type&& iterable)
-            //: current(iterable.begin()),
-              //end(iterable.end())
-        //{ 
-            //static_assert(false, "Cannot create generic ISource from an rvalue InputIterable.");
-        //}
+        // TODO: somehow have a static assert preventing the use
+        // of an rvalue constructor
 
         // default constructors
         ISource(ISource const& other) = default;
@@ -418,6 +335,8 @@ namespace Plumbing
 
         pipe_type pipe_;
     };
+
+    //========================================================
 
     // TODO: create a "Source" class to encapsulate an input to a pipe, so ">>"
     // can be used safely
@@ -512,12 +431,32 @@ namespace Plumbing
 
     };
 
+    //========================================================
+
+    template <typename T>
+    struct is_source : std::false_type { };
+
+    template <typename T>
+    struct is_source<Source<T>> : std::true_type { };
+
+    //========================================================
+
     template <typename InputIterable>
     Source<typename std::remove_reference<InputIterable>::type>
     makeSource(InputIterable&& iterable)
     {
         return Source<typename std::remove_reference<InputIterable>::type>(iterable);
     }
+
+    //========================================================
+
+    /**
+     * Type alias that encapsulates the output of Pipe<Expected<T>
+     */
+    template <typename T>
+    using Sink = Source< std::shared_ptr<Pipe<Expected<T>>> >;
+
+    //========================================================
 
     namespace detail
     {
@@ -721,35 +660,19 @@ namespace Plumbing
                     Func
                 >::return_type return_type;
 
+
         return connect( connect(std::forward<InputIterable>(input), func), func2, funcs... );
     }
 
-    template <typename InputIterable, typename Func>
-    inline auto operator >> (Source<InputIterable>&& input, Func func)
-    -> decltype(connect(std::move(input), func))
+    template <typename S, typename Func>
+    inline auto operator >> (S&& input, Func func)
+    -> decltype(connect(std::forward<S>(input), func))
     {
-        return connect(std::move(input), func);
-    }
+        static_assert( is_source<S>::value,
+                "Cannot chain filters to a non-Source type. "
+                "Make sure left argument of (>>) is/returns a Source." );
 
-    template <typename InputIterable, typename Func>
-    inline auto operator >> (Source<InputIterable>& input, Func func)
-    -> decltype(connect(input, func))
-    {
-        return connect(input, func);
-    }
-
-    template <typename T, typename Func>
-    inline auto operator >> (Sink<T>&& input, Func func)
-    -> decltype(connect(std::move(input), func))
-    {
-        return connect(std::move(input), func);
-    }
-
-    template <typename T, typename Func>
-    inline auto operator >> (Sink<T>& input, Func func)
-    -> decltype(connect(input, func))
-    {
-        return connect(input, func);
+        return connect(std::forward<S>(input), func);
     }
 
     // TODO: enforce const& for func, so callable objects passed in do not
