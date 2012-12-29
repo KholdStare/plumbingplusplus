@@ -127,4 +127,97 @@ public:
   }
 };
 
+template <>
+  class Expected<void> {
+  std::exception_ptr spam;
+  bool gotHam;
+
+
+public:
+  Expected() : gotHam(true) { }
+
+  void swap(Expected& rhs) {
+    if (gotHam) {
+      if (!rhs.gotHam) {
+        auto t = std::move(rhs.spam);
+        new(&spam) std::exception_ptr(t);
+        std::swap(gotHam, rhs.gotHam);
+      }
+    } else {
+      if (rhs.gotHam) {
+        rhs.swap(*this);
+      } else {
+        spam.swap(rhs.spam);
+        std::swap(gotHam, rhs.gotHam);
+      }
+    }
+  }
+
+  Expected& operator=(Expected<void> rhs) {
+    swap(rhs);
+    return *this;
+  }
+
+  ~Expected() {
+    //using std::exception_ptr;
+    if (!gotHam) spam.~exception_ptr();
+  }
+
+  static Expected<void> fromException(std::exception_ptr p) {
+    Expected<void> result;
+    result.gotHam = false;
+    new(&result.spam) std::exception_ptr(std::move(p));
+    return result;
+  }
+
+  template <class E>
+  static Expected<void> fromException(const E& exception) {
+    if (typeid(exception) != typeid(E)) {
+      throw std::invalid_argument(
+        "Expected<void>::fromException: slicing detected.");
+    }
+    return fromException(std::make_exception_ptr(exception));
+  }
+
+  static Expected<void> fromException() {
+    return fromException(std::current_exception());
+  }
+
+  bool valid() const {
+    return gotHam;
+  }
+
+  /**
+   * implicit conversion may throw if spam
+   */
+  operator void() {
+    if (!gotHam) std::rethrow_exception(spam);
+  }
+
+  void get() const {
+    if (!gotHam) std::rethrow_exception(spam);
+  }
+
+  template <class E>
+  bool hasException() const {
+    try {
+      if (!gotHam) std::rethrow_exception(spam);
+    } catch (const E& object) {
+      return true;
+    } catch (...) {
+    }
+    return false;
+  }
+
+  template <class F>
+  static Expected fromCode(F fun) {
+    try {
+      fun();
+      return Expected();
+    } catch (...) {
+      return fromException();
+    }
+  }
+};
+
 #endif /* end of include guard: EXPECTED_HPP_TN6DJT51 */

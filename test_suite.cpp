@@ -474,7 +474,7 @@ BOOST_AUTO_TEST_CASE( simple_pipeline )
             output.push_back(checker.payload[0]);
         };
 
-    connect(checkerVec, testFunc).wait();
+    connect( makeSource(checkerVec), testFunc).wait();
 
     BOOST_CHECK_EQUAL( output.size(), 10 );
     BOOST_CHECK_EQUAL( checkerVec[0].copies(), 0 );
@@ -485,18 +485,21 @@ BOOST_AUTO_TEST_CASE( simple_pipeline )
     BOOST_CHECK_EQUAL( checkerVec[0].copies(), 1 );
     BOOST_CHECK_EQUAL( checkerVec[0].moves(), 0 );
 
-    connect(std::move(checkerVecCopy), testFunc).wait();
+    connect( makeSource(std::move(checkerVecCopy)), testFunc).wait();
 
     BOOST_CHECK_EQUAL( output.size(), 20 );
     BOOST_CHECK_EQUAL( checkerVec[0].copies(), 1 );
     BOOST_CHECK_EQUAL( checkerVec[0].moves(), 0 );
 }
 
-move_checker modifyMoveChecker(move_checker& checker) 
+// TODO: look into how to make an lvalue reference possible
+// with the generic Source<InputIterable>
+move_checker modifyMoveChecker(move_checker const& checker) 
 {
-    checker.payload[0] = THE_ANSWER_TO_LIFE_THE_UNIVERSE_AND_EVERYTHING;
+    move_checker result(std::move(checker));
+    result.payload[0] = THE_ANSWER_TO_LIFE_THE_UNIVERSE_AND_EVERYTHING;
 
-    return checker;
+    return result;
 }
 
 BOOST_AUTO_TEST_CASE( two_part_pipeline )
@@ -510,7 +513,7 @@ BOOST_AUTO_TEST_CASE( two_part_pipeline )
             output.push_back(checker.payload[0]);
         };
 
-    connect(checkerVec, modifyMoveChecker, testFunc).wait();
+    connect( makeSource(checkerVec), modifyMoveChecker, testFunc).wait();
 
     BOOST_CHECK_EQUAL( output.size(), 10 );
     BOOST_CHECK_EQUAL( output[0], THE_ANSWER_TO_LIFE_THE_UNIVERSE_AND_EVERYTHING );
@@ -522,7 +525,7 @@ BOOST_AUTO_TEST_CASE( two_part_pipeline )
     BOOST_CHECK_EQUAL( checkerVec[0].copies(), 4 );
     BOOST_CHECK_EQUAL( checkerVec[0].moves(), 0 );
 
-    connect(std::move(checkerVecCopy), modifyMoveChecker, testFunc).wait();
+    connect( makeSource(std::move(checkerVecCopy)), modifyMoveChecker, testFunc).wait();
 
     BOOST_CHECK_EQUAL( output.size(), 20 );
     BOOST_CHECK_EQUAL( output[0], THE_ANSWER_TO_LIFE_THE_UNIVERSE_AND_EVERYTHING );
@@ -625,6 +628,48 @@ BOOST_AUTO_TEST_CASE( expected_andrei_tests )
     BOOST_CHECK_EQUAL(THE_ANSWER_TO_LIFE_THE_UNIVERSE_AND_EVERYTHING, g.get());
 
     g = Expected<int>::fromCode([]() -> Expected<int> {
+            throw THE_ANSWER_TO_LIFE_THE_UNIVERSE_AND_EVERYTHING;
+        });
+
+    BOOST_CHECK_EQUAL(0, g.valid());
+    BOOST_CHECK_EQUAL(1, g.hasException<int>());
+}
+
+void voidFunction(int& a)
+{
+    a += THE_ANSWER_TO_LIFE_THE_UNIVERSE_AND_EVERYTHING;
+}
+
+BOOST_AUTO_TEST_CASE( expected_andrei_tests_void )
+{
+
+    Expected<void> e;
+    BOOST_CHECK_EQUAL(true, e.valid());
+    auto e1 = e;
+    BOOST_CHECK_EQUAL(true, e1.valid());
+    e = e1;
+    BOOST_CHECK_EQUAL(true, e1.valid());
+
+    Expected<void> f = Expected<void>::fromException(THE_ANSWER_TO_LIFE_THE_UNIVERSE_AND_EVERYTHING);
+    BOOST_CHECK_EQUAL(0, f.valid());
+
+    try {
+        throw std::exception();
+    }
+    catch (...) {
+        Expected<void> f = Expected<void>::fromException();
+        BOOST_CHECK_EQUAL(0, f.valid());
+        BOOST_CHECK_EQUAL(0, f.hasException<int>());
+        BOOST_CHECK_EQUAL(true, f.hasException<std::exception>());
+    }
+
+    int val = 5;
+    auto g = Expected<void>::fromCode([&val] {
+            voidFunction(val);
+        });
+    g.get();
+
+    g = Expected<void>::fromCode([]() -> Expected<void> {
             throw THE_ANSWER_TO_LIFE_THE_UNIVERSE_AND_EVERYTHING;
         });
 
