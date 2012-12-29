@@ -1,5 +1,6 @@
 // This code is put in the public domain by Andrei Alexandrescu
 // See http://www.reddit.com/r/programming/comments/14m1tc/andrei_alexandrescu_systematic_error_handling_in/c7etk47
+// Some edits by Alexander Kondratskiy.
 
 #ifndef EXPECTED_HPP_TN6DJT51
 #define EXPECTED_HPP_TN6DJT51
@@ -84,6 +85,15 @@ public:
     return fromException(std::current_exception());
   }
 
+  template <class U>
+  static Expected<T> transferException(Expected<U> const& other) {
+    if (other.valid()) {
+      throw std::invalid_argument(
+        "Expected<T>::transferException: other Expected<U> does not contain an exception.");
+    }
+    return fromException(other.spam);
+  }
+
   bool valid() const {
     return gotHam;
   }
@@ -127,6 +137,7 @@ public:
   }
 };
 
+// TODO: clean this up
 template <>
   class Expected<void> {
   std::exception_ptr spam;

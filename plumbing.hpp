@@ -36,8 +36,6 @@ namespace Plumbing
         // TODO: perhaps create a different queue which is "infinite" (a linked list),
         //       but provides a way to "stall" it on a predicate (e.g. memory usage)
 
-        // TODO: think about exeption safety
-
         std::vector<boost::optional<T>> fifo_;
         int write_;
         int read_;
@@ -261,7 +259,9 @@ namespace Plumbing
     public:
         typedef typename wrapped_type::const_iterator const_iterator;
         typedef typename const_iterator::value_type value_type;
+        typedef decltype( *std::declval<const_iterator>() ) return_type;
 
+        // TODO: consider requiring default constructor for a "null" value
         /**
          * Construct ISource from an InputIterable lvalue.
          */
@@ -283,7 +283,7 @@ namespace Plumbing
             return current != end;
         }
 
-        value_type next() {
+        return_type next() {
             return *current++;
         }
         
@@ -305,6 +305,7 @@ namespace Plumbing
     public:
         typedef T value_type;
         typedef std::shared_ptr<Pipe<value_type>> pipe_type;
+        typedef value_type return_type;
 
         ISource(pipe_type const& pipe)
             : pipe_(pipe)
@@ -361,6 +362,7 @@ namespace Plumbing
         typedef typename ISource<wrapped_type>::value_type value_type;
         typedef value_type* pointer;
         typedef value_type& reference;
+        typedef typename ISource<wrapped_type>::return_type return_type;
         typedef std::input_iterator_tag iterator_category;
         typedef void difference_type;
 
@@ -398,7 +400,7 @@ namespace Plumbing
          * To fullfil the input_const_iterator category, both returns the 
          * the next element and advances the inner const_iterator
          */
-        value_type operator * ()    { return impl_->next(); }
+        return_type operator * ()    { return impl_->next(); }
 
         bool operator == (const_iterator const& other) const
         {
@@ -438,6 +440,9 @@ namespace Plumbing
 
     template <typename T>
     struct is_source<Source<T>> : std::true_type { };
+
+    template <typename T>
+    struct is_source<Source<T>&> : std::true_type { };
 
     //========================================================
 
@@ -554,67 +559,159 @@ namespace Plumbing
 
         //========================================================
 
-        template <typename Output>
+        template <typename S, typename In, typename Func, typename Out>
+        struct thread_task
+        {
+            typedef std::shared_ptr<Pipe<Expected<Out>>> pipe_type;
+
+            /**
+             * Task to be performed by the dedicated thread
+             */
+            static void invoke(S&& source, Func func, pipe_type pipe)
+            {
+                while (source.impl().hasNext())
+                {
+                    // TODO: use scope guard
+                    try
+                    {
+                        if ( !pipe->enqueue(func(source.impl().next())) )
+                        {
+                            break;
+                        }
+                    }
+                    catch (...)
+                    {
+                        pipe->enqueue(Expected<Out>::fromException());
+                        break;
+                    }
+                }
+                pipe->close();
+                source.impl().close();
+            }
+        };
+
+        template <typename S, typename In, typename Func, typename Out>
+        struct thread_task<S, Expected<In>, Func, Out>
+        {
+            typedef std::shared_ptr<Pipe<Expected<Out>>> pipe_type;
+
+            /**
+             * Task to be performed by the dedicated thread
+             */
+            static void invoke(S&& source, Func func, pipe_type pipe)
+            {
+                while (source.impl().hasNext())
+                {
+                    Expected<In> e = source.impl().next();
+                    if (!e.valid())
+                    {
+                        pipe->enqueue(Expected<Out>::transferException(e));
+                        break;
+                    }
+
+                    // TODO: use scope guard
+                    try
+                    {
+                        if ( !pipe->enqueue(func(e.get())) )
+                        {
+                            break;
+                        }
+                    }
+                    catch (...)
+                    {
+                        pipe->enqueue(Expected<Out>::fromException());
+                        break;
+                    }
+                }
+
+                pipe->close();
+                source.impl().close();
+            }
+        };
+
+        //========================================================
+
+        template <typename In, typename Out>
         struct connect_impl
         {
+            typedef std::shared_ptr<Pipe<Expected<Out>>> pipe_type;
 
-            template <typename InputIterable, typename Func>
-            static Sink<Output> connect(InputIterable&& source, Func func, size_t capacity = 3)
+            template <typename S, typename Func>
+            static Sink<Out> connect(S&& source, Func func, size_t capacity = 3)
             {
-                auto pipe = std::make_shared<Pipe<Expected<Output>>>(capacity);
+                static_assert( is_source<S>::value,
+                        "Cannot chain filters to a non-Source type. "
+                        "Connect implementation requires a Source as input." );
+
+                auto pipe = std::make_shared<Pipe<Expected<Out>>>(capacity);
 
                 // start processing thread
                 std::thread processingThread(
-                        [pipe, func](InputIterable&& source) mutable
-                        {
-                            for (auto&& e : source) {
-                                pipe->enqueue(func(e));
-                            }
-                            pipe->close();
-                            //while (source.hasNext())
-                            //{
-                                //// TODO: use scope guard
-                                //try {
-                                    //if ( pipe->enqueue(func(source.dequeue())) )
-                                    //{
-                                        //break;
-                                    //}
-                                //}
-                                //catch (...) {
-                                    //pipe->enqueue(Expected<Output>::fromException());
-                                    //source->close();
-                                //}
+                        thread_task_blah<S, Func>,
+                        //[pipe, func](S&& source) mutable
+                        //{
+                            //for (auto&& e : source) {
+                                //pipe->enqueue(func(e));
                             //}
                             //pipe->close();
-                        },
-                        detail::async_forwarder<InputIterable>(std::forward<InputIterable>(source))
+                        //},
+                        detail::async_forwarder<S>(std::forward<S>(source)),
+                        func,
+                        pipe
                 );
 
                 processingThread.detach(); // TODO: shouldn't detach?
 
-                return Sink<Output>(pipe);
+                return makeSource(std::move(pipe));
+            }
+
+        private:
+            /**
+             * Task to be performed by the dedicated thread
+             */
+            template <typename S, typename Func>
+            static void thread_task_blah(S&& source, Func func, pipe_type pipe)
+            {
+                while (source.impl().hasNext())
+                {
+                    // TODO: use scope guard
+                    try
+                    {
+                        if ( !pipe->enqueue(func(source.impl().next())) )
+                        {
+                            break;
+                        }
+                    }
+                    catch (...)
+                    {
+                        pipe->enqueue(Expected<Out>::fromException());
+                        break;
+                    }
+                }
+                pipe->close();
+                source.impl().close();
             }
         };
 
-        template <>
-        struct connect_impl<void>
+        template <typename In>
+        struct connect_impl<In, void>
         {
 
             /**
              * Specialization for functions returning void.
              */
-            template <typename InputIterable, typename Func>
-            static std::future<void> connect(InputIterable&& input, Func func)
+            template <typename S, typename Func>
+            static std::future<void> connect(S&& input, Func func)
             {
                 // start processing thread
                 return std::async(std::launch::async,
-                        [func](InputIterable&& input) mutable
+                        [func](S&& input) mutable
                         {
                             for (auto&& e : input) {
                                 func(e);
                             }
                         },
-                        detail::async_forwarder<InputIterable>(std::forward<InputIterable>(input))
+                        detail::async_forwarder<S>(std::forward<S>(input))
                 );
             }
         };
@@ -628,40 +725,44 @@ namespace Plumbing
      * @note functions passed in have to take arguments either by T&& or Tconst&,
      * in other words input arguments must be able to bind to rvalues.
      */
-    template <typename InputIterable, typename Func>
-    auto connect(InputIterable&& input, Func func)
+    template <typename S, typename Func>
+    auto connect(S&& input, Func func)
     ->  typename detail::connect_traits<
-                typename std::remove_reference<InputIterable>::type::const_iterator::value_type,
+                typename std::remove_reference<S>::type::const_iterator::value_type,
                 Func
         >::monadic_type
     {
 
+        static_assert( is_source<S>::value,
+                "Cannot chain filters to a non-Source type. "
+                "Make sure the first argument to connect is a Source." );
 
+        typedef typename std::remove_reference<S>::type::const_iterator::value_type input_type;
         typedef typename detail::connect_traits<
-                    typename std::remove_reference<InputIterable>::type::const_iterator::value_type,
+                    input_type,
                     Func
                 >::return_type return_type;
 
-        return detail::connect_impl<return_type>::connect(std::forward<InputIterable>(input), func);
+        return detail::connect_impl<input_type, return_type>::connect(std::forward<S>(input), func);
     }
 
     // TODO: forward funcs too
-    template <typename InputIterable, typename Func, typename Func2, typename... Funcs>
-    auto connect(InputIterable&& input, Func func, Func2 func2, Funcs... funcs)
+    template <typename S, typename Func, typename Func2, typename... Funcs>
+    auto connect(S&& input, Func func, Func2 func2, Funcs... funcs)
     ->  typename detail::connect_traits<
-            typename std::remove_reference<InputIterable>::type::const_iterator::value_type,
+            typename std::remove_reference<S>::type::const_iterator::value_type,
             Func,
             Func2,
             Funcs...
         >::monadic_type
     {
         typedef typename detail::connect_traits<
-                    typename std::remove_reference<InputIterable>::type::const_iterator::value_type,
+                    typename std::remove_reference<S>::type::const_iterator::value_type,
                     Func
                 >::return_type return_type;
 
 
-        return connect( connect(std::forward<InputIterable>(input), func), func2, funcs... );
+        return connect( connect(std::forward<S>(input), func), func2, funcs... );
     }
 
     template <typename S, typename Func>

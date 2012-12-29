@@ -84,9 +84,10 @@ int main(int argc, char const *argv[])
             return s[0]; // print first character
         };
 
-    ( makeSource(vals) >> getFirstChar >> printLine<char> ).wait();
-    connect( vals, getFirstChar, printLine<char> ).wait();
-    connect( vals, printLine<std::string>).wait();
+    auto source = makeSource(vals);
+    ( source >> getFirstChar >> printLine<char> ).wait();
+    connect( source, getFirstChar, printLine<char> ).wait();
+    connect( source, printLine<std::string>).wait();
 
     return 0;
 }
