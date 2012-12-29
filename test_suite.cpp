@@ -715,3 +715,78 @@ BOOST_AUTO_TEST_CASE( pipe_test )
 }
 
 BOOST_AUTO_TEST_SUITE_END()
+//____________________________________________________________________________//
+
+BOOST_AUTO_TEST_SUITE( exception_propagation )
+
+
+
+BOOST_AUTO_TEST_CASE( one_exception )
+{
+    move_checker checker;
+
+    auto thrower =
+        [](int val)
+        {
+            if (val == 1)
+            {
+                throw THE_ANSWER_TO_LIFE_THE_UNIVERSE_AND_EVERYTHING;
+            }
+
+            return val+1;
+        };
+
+    auto intSource = makeSource(checker);
+
+    Sink<int> sink = ( intSource >> thrower );
+
+    BOOST_REQUIRE_EQUAL( true, sink.impl().hasNext() );
+    Expected<int> e = sink.impl().next();
+
+    BOOST_CHECK_EQUAL( false, e.valid() );
+    BOOST_CHECK_EQUAL( true, e.hasException<int>() );
+    BOOST_CHECK_EQUAL( false, sink.impl().hasNext() );
+}
+
+BOOST_AUTO_TEST_CASE( delayed_exception )
+{
+    move_checker checker;
+    static const int failIndex = 3;
+
+    // throw after consuming a few values
+    auto thrower =
+        [=](int val)
+        {
+            if (val == failIndex)
+            {
+                throw THE_ANSWER_TO_LIFE_THE_UNIVERSE_AND_EVERYTHING;
+            }
+
+            return val+1;
+        };
+
+    // set up source and pipeline
+    auto intSource = makeSource(checker);
+    Sink<int> sink = ( intSource >> thrower );
+
+    // loop through first valid values
+    for (int i = 1; i < failIndex; ++i)
+    {
+        BOOST_REQUIRE_EQUAL( true, sink.impl().hasNext() );
+        Expected<int> e = sink.impl().next();
+
+        BOOST_CHECK_EQUAL( true, e.valid() );
+        BOOST_CHECK_EQUAL( i+1, e.get() );
+        BOOST_CHECK_EQUAL( false, e.hasException<int>() );
+        BOOST_CHECK_EQUAL( true, sink.impl().hasNext() );
+    }
+
+    BOOST_REQUIRE_EQUAL( true, sink.impl().hasNext() );
+    Expected<int> e = sink.impl().next();
+
+    BOOST_CHECK_EQUAL( false, e.valid() );
+    BOOST_CHECK_EQUAL( true, e.hasException<int>() );
+    BOOST_CHECK_EQUAL( false, sink.impl().hasNext() );
+}
+
+BOOST_AUTO_TEST_SUITE_END()

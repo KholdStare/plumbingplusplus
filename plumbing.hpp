@@ -647,7 +647,7 @@ namespace Plumbing
 
                 // start processing thread
                 std::thread processingThread(
-                        thread_task_blah<S, Func>,
+                        thread_task<S, In, Func, Out>::invoke,
                         //[pipe, func](S&& source) mutable
                         //{
                             //for (auto&& e : source) {
@@ -737,7 +737,7 @@ namespace Plumbing
                 "Cannot chain filters to a non-Source type. "
                 "Make sure the first argument to connect is a Source." );
 
-        typedef typename std::remove_reference<S>::type::const_iterator::value_type input_type;
+        typedef typename std::remove_reference<S>::type::value_type input_type;
         typedef typename detail::connect_traits<
                     input_type,
                     Func
@@ -756,8 +756,12 @@ namespace Plumbing
             Funcs...
         >::monadic_type
     {
+        static_assert( is_source<S>::value,
+                "Cannot chain filters to a non-Source type. "
+                "Make sure the first argument to connect is a Source." );
+
         typedef typename detail::connect_traits<
-                    typename std::remove_reference<S>::type::const_iterator::value_type,
+                    typename std::remove_reference<S>::type::value_type,
                     Func
                 >::return_type return_type;
 
