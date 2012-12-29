@@ -33,9 +33,9 @@ Enter Plumbing++, which automatically creates threads for each processing step,
 and joins each with a concurrent FIFO:
 
     
-    std::vector<std:string> paths{"tree.jpg", "mountain.jpg", "car.jpg"};
+    std::vector<std::string> paths{"tree.jpg", "mountain.jpg", "car.jpg"};
 
-    (paths >> loadImage >> processImage >> saveImage).wait();
+    (Plumbing::makeSource(paths) >> loadImage >> processImage >> saveImage).wait();
 
 Done! Each connection takes an iterable object, and returns the end of a
 concurrent FIFO called a Sink:
@@ -45,7 +45,7 @@ concurrent FIFO called a Sink:
 These can be freely iterated over, or used in STL algorithms:
 
     std::vector<Image<RGB>> imageCopies;
-    std::copy(imageSink.begin(), imageSink.end(), std::back_inserter(imageCopies))
+    std::copy(imageSink.begin(), imageSink.end(), std::back_inserter(imageCopies));
 
     for (auto&& elem : anotherSink)
     {
@@ -56,12 +56,26 @@ Each Sink (being iterable) thus becomes the input to the next
 connection. If the last function in the pipeline returns void, the connect call
 returns a future, so the caller can wait for the whole computation to complete:
 
-    std::future<void> future = (paths >> loadImage >> processImage >> saveImage);
+    std::future<void> future = (source >> loadImage >> processImage >> saveImage);
     future.wait();
+
+Any exceptions thrown from processing functions are caught in their threads and
+propagated through the pipeline, cleanly closing all threads, and leaving the
+culprit exception in the future:
+
+    std::future<void> future = (source >> loadImage >> processImage >> saveImage);
+    try {
+        future.get();
+    }
+    catch (std::runtime_exception& e)
+    {
+        // deal with exception
+    }
 
 For those opposed to operator overloading, a variadic function "connect" that does the same thing:
 
-    Plumbing::connect(paths, loadImage, processImage, saveImage).wait();
+    Plumbing::connect(Plumbing::makeSource(paths),
+                      loadImage, processImage, saveImage).wait();
 
 
 ## Progress/Flaws
@@ -108,6 +122,11 @@ The alternative is to have two distinct types:
 This is less elegant requiring more types and more functions definitions, but
 will be more efficient, incurring no calls to virtual methods, while restricting
 the use of operator &gt;&gt;
+
+*UPDATE* I have decided to kill two birds with one stone. The new Source class
+encapsulates any iterable, including a Pipe- however, it is polymorphic at
+compile time, so has zero overhead. A Sink is just a type alias for a Source
+over Pipes.
 
 ## Future Work/Ideas
 
