@@ -31,7 +31,7 @@ BOOST_AUTO_TEST_SUITE(pipe_tests)
 
 BOOST_AUTO_TEST_CASE( empty_pipe )
 {
-    Pipe<std::string> pipe;
+    Pipe<std::string> pipe(2);
     std::thread a([&](){ 
             while (pipe.hasNext())
             {
@@ -50,7 +50,7 @@ BOOST_AUTO_TEST_CASE( empty_pipe )
 
 BOOST_AUTO_TEST_CASE( one_element_pipe )
 {
-    Pipe<int> pipe;
+    Pipe<int> pipe(2);
     std::vector<int> output;
     std::thread a([&](){ 
             while (pipe.hasNext())
@@ -76,7 +76,7 @@ BOOST_AUTO_TEST_CASE( one_element_pipe )
 
 BOOST_AUTO_TEST_CASE( many_element_pipe )
 {
-    Pipe<int> pipe;
+    Pipe<int> pipe(2);
     std::vector<int> input{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
     std::vector<int> output;
     std::thread a([&](){ 
@@ -175,7 +175,7 @@ BOOST_AUTO_TEST_CASE( move_through_pipe )
     move_checker newChecker = pipe.dequeue();
     pipe.close();
 
-    // TODO: would like to minimize copies
+    // TODO: would like to minimize copies (make optional move aware)
     BOOST_CHECK_EQUAL( checker.copies(), 2 );
     BOOST_CHECK_EQUAL( checker.moves(), 0 );
 }
@@ -217,6 +217,10 @@ BOOST_AUTO_TEST_CASE( premature_closing )
     a.join();
 
     BOOST_REQUIRE_EQUAL( output.size(), limit );
+    for (size_t i = 0; i < limit; ++i)
+    {
+        BOOST_CHECK_EQUAL( input[i], output[i] );
+    }
 }
 
 /**
@@ -595,45 +599,6 @@ BOOST_AUTO_TEST_CASE( two_part_pipeline )
 BOOST_AUTO_TEST_SUITE_END()
 //____________________________________________________________________________//
 
-BOOST_AUTO_TEST_SUITE( iterator_filter_tests )
-
-/**
- * Wraps std::copy so it can be passed uninstantiated
- */
-struct copy_wrapper
-{
-
-    template <typename InputIt, typename OutputIt>
-    void operator() (InputIt&& in_first, InputIt&& in_last, OutputIt&& out_first)
-    {
-        std::copy(std::forward<InputIt>(in_first),
-                  std::forward<InputIt>(in_last),
-                  std::forward<OutputIt>(out_first));
-    }
-};
-
-
-BOOST_AUTO_TEST_CASE( int_copy )
-{
-    move_checker checker;
-
-    std::vector<int> expected;
-    std::copy(checker.begin(), checker.end(), std::back_inserter(expected));
-
-    auto iterfilter = makeIteratorFilter<int, int>(copy_wrapper());
-
-    std::vector<int> results;
-    iterfilter(checker.begin(), checker.end(), std::back_inserter(results));
-
-    BOOST_CHECK_EQUAL( expected.size(), results.size() );
-    BOOST_CHECK( expected == results );
-    BOOST_CHECK_EQUAL( checker.copies(), 0 );
-    BOOST_CHECK_EQUAL( checker.moves(), 0 );
-}
-
-BOOST_AUTO_TEST_SUITE_END()
-//____________________________________________________________________________//
-
 BOOST_AUTO_TEST_SUITE( expected_tests )
 
 BOOST_AUTO_TEST_CASE( expected_andrei_tests )
@@ -826,3 +791,246 @@ BOOST_AUTO_TEST_CASE( delayed_exception )
 }
 
 BOOST_AUTO_TEST_SUITE_END()
+//____________________________________________________________________________//
+
+BOOST_AUTO_TEST_SUITE( iterator_filter_tests )
+
+/**
+ * Wraps std::copy so it can be passed uninstantiated
+ */
+struct copy_wrapper
+{
+
+    template <typename InputIt, typename OutputIt>
+    void operator() (InputIt in_first, InputIt in_last, OutputIt out_first)
+    {
+        std::copy(in_first, in_last, out_first);
+    }
+};
+
+BOOST_AUTO_TEST_CASE( int_copy )
+{
+    move_checker checker;
+
+    std::vector<int> expected;
+    std::copy(checker.begin(), checker.end(), std::back_inserter(expected));
+
+    auto iterfilter = makeIteratorFilter<int, int>(copy_wrapper());
+
+    std::vector<int> results;
+    iterfilter(checker.begin(), checker.end(), std::back_inserter(results));
+
+    BOOST_CHECK_EQUAL( expected.size(), results.size() );
+    BOOST_CHECK( expected == results );
+    BOOST_CHECK_EQUAL( checker.copies(), 0 );
+    BOOST_CHECK_EQUAL( checker.moves(), 0 );
+}
+
+BOOST_AUTO_TEST_CASE( in_pipeline )
+{
+    move_checker checker;
+
+    std::vector<int> expected;
+    std::copy(checker.begin(), checker.end(), std::back_inserter(expected));
+
+    std::vector<int> results;
+
+    auto fut =
+        makeSource(checker)
+        >> makeIteratorFilter<int, int>(copy_wrapper())
+        >> [&](int v) { results.push_back(v); };
+
+    fut.get();
+
+    BOOST_CHECK_EQUAL( expected.size(), results.size() );
+    BOOST_CHECK( expected == results );
+    BOOST_CHECK_EQUAL( checker.copies(), 0 );
+    BOOST_CHECK_EQUAL( checker.moves(), 0 );
+}
+
+struct move_checker_to_int
+{
+    template <typename InputIt, typename OutputIt>
+    void operator() (InputIt cur, InputIt in_last, OutputIt out_first)
+    {
+        while (cur != in_last)
+        {
+            *out_first = ( *cur++ ).payload[0];
+            out_first++;
+        }
+    }
+};
+
+BOOST_AUTO_TEST_CASE( move_count )
+{
+    std::vector<move_checker> checkerVec(10);
+    std::vector<int> output;
+
+    auto intPusher =
+        [&](int val) { output.push_back(val); };
+
+    auto fut = 
+        makeSource(checkerVec)
+        >> makeIteratorFilter<move_checker, int>(move_checker_to_int())
+        >> intPusher;
+
+    fut.get();
+
+    BOOST_CHECK_EQUAL( output.size(), 10 );
+    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 0 );
+    BOOST_CHECK_EQUAL( checkerVec[0].moves(), 0 );
+
+    std::vector<move_checker> checkerVecCopy(checkerVec);
+
+    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 1 );
+    BOOST_CHECK_EQUAL( checkerVec[0].moves(), 0 );
+
+    fut = 
+        makeSource(std::move(checkerVec))
+        >> makeIteratorFilter<move_checker, int>(move_checker_to_int())
+        >> intPusher;
+
+    fut.get();
+
+    BOOST_CHECK_EQUAL( output.size(), 20 );
+    BOOST_CHECK_EQUAL( checkerVec[0].copies(), 1 );
+    BOOST_CHECK_EQUAL( checkerVec[0].moves(), 0 );
+}
+
+struct many_to_one
+{
+    /**
+     * Sum every 3 numbers
+     */
+    template <typename InputIt, typename OutputIt>
+    void operator() (InputIt cur, InputIt in_last, OutputIt out)
+    {
+        size_t numacc = 0;
+        int sum = 0;
+
+        while (cur != in_last)
+        {
+            sum += *cur++;
+            numacc++;
+
+            if (numacc == 3)
+            {
+                *out = sum;
+                out++;
+                sum = 0;
+                numacc = 0;
+            }
+        }
+    }
+};
+
+BOOST_AUTO_TEST_CASE( many_to_one_test )
+{
+    std::vector<int> input { 1, 2, 3, 4, 5, 6, 7 };
+    std::vector<int> output;
+
+    auto intPusher =
+        [&](int val) { output.push_back(val); };
+
+    auto fut = 
+        makeSource(input)
+        >> makeIteratorFilter<int, int>(many_to_one())
+        >> intPusher;
+
+    fut.get();
+
+    BOOST_CHECK_EQUAL( output.size(), 2 );
+    BOOST_CHECK_EQUAL( output[0], 6 );
+    BOOST_CHECK_EQUAL( output[1], 15 );
+}
+
+struct one_to_many
+{
+    /**
+     * For every number n, output n, n^2, n^4
+     */
+    template <typename InputIt, typename OutputIt>
+    void operator() (InputIt cur, InputIt in_last, OutputIt out)
+    {
+        while (cur != in_last)
+        {
+            int n = *cur++;
+
+            for (int i = 1; i < 4; ++i)
+            {
+                *out = n;
+                out++;
+
+                n*=n;
+            }
+        }
+    }
+};
+
+BOOST_AUTO_TEST_CASE( one_to_many_test )
+{
+    std::vector<int> input { 1, 2, 3, 4, 5, 6, 7 };
+    std::vector<int> output;
+
+    auto intPusher =
+        [&](int val) { output.push_back(val); };
+
+    auto fut = 
+        makeSource(input)
+        >> makeIteratorFilter<int, int>(one_to_many())
+        >> intPusher;
+
+    fut.get();
+
+    BOOST_CHECK_EQUAL( output.size(), input.size()*3 );
+    BOOST_CHECK_EQUAL( output[0], 1 );
+    BOOST_CHECK_EQUAL( output[3], 2 );
+    BOOST_CHECK_EQUAL( output[4], 4 );
+    BOOST_CHECK_EQUAL( output[5], 16 );
+    BOOST_CHECK_EQUAL( output[12], 5 );
+    BOOST_CHECK_EQUAL( output[13], 25 );
+    BOOST_CHECK_EQUAL( output[14], 625 );
+}
+
+/**
+ * Tests what happens when the output iterator can no
+ * longer be written to, as that pipe has been closed.
+ */
+BOOST_AUTO_TEST_CASE( premature_pipe_close )
+{
+    std::shared_ptr<Pipe<int>> input = std::make_shared<Pipe<int>>();
+
+    PipeSource<int> output = 
+        makeSource(input)
+        >> makeIteratorFilter<int, int>(many_to_one());
+
+    BOOST_CHECK_EQUAL( input->enqueue(1), true );
+    BOOST_CHECK_EQUAL( input->enqueue(2), true );
+    BOOST_CHECK_EQUAL( input->enqueue(3), true );
+    BOOST_CHECK_EQUAL( output.impl().hasNext(), true );
+
+    Expected<int> e = output.impl().next();
+    BOOST_CHECK_EQUAL( e.valid(), true );
+    BOOST_CHECK_EQUAL( e.get(), 6 );
+
+    // enqueue another
+    BOOST_CHECK_EQUAL( input->enqueue(4), true );
+    // but close from read side 
+    output.impl().close();
+
+    // enqueue more to get enough to create a new value
+    BOOST_CHECK_EQUAL( input->enqueue(5), true );
+    BOOST_CHECK_EQUAL( input->enqueue(6), true );
+
+    // hacky... wait for values to propagate through.
+    std::chrono::milliseconds dura( 20 );
+    std::this_thread::sleep_for( dura );
+
+    // make sure the close propagated back
+    BOOST_CHECK_EQUAL( input->enqueue(666), false );
+
+    input->close();
+}
+
+BOOST_AUTO_TEST_SUITE_END()
+//____________________________________________________________________________//

@@ -75,7 +75,7 @@ namespace Plumbing
         }
 
     public:
-        Pipe(std::size_t fifoSize = 2)
+        Pipe(std::size_t fifoSize = 10)
             : fifo_(fifoSize),
               write_(0),
               read_(0),
@@ -113,13 +113,13 @@ namespace Plumbing
          *  Facilities for writing to pipe  *
          ************************************/
         
-        // TODO: make nothrow
         /**
          * Enqueue a value of type T into the pipe, if possible.
          *
          * @return whether the operation succeeded.
          */
-        bool enqueue(T const& e) noexcept
+        template <typename U>
+        bool enqueue(U&& e) noexcept
         {
             // inexpensive check before acquiring lock
             if (!open_) { return false; }
@@ -134,7 +134,7 @@ namespace Plumbing
             }
 
             // perform actual write
-            fifo_[write_] = e;
+            fifo_[write_] = std::forward<U>(e);
             incrementWrite();
 
             readyForRead_.notify_one();
@@ -142,31 +142,6 @@ namespace Plumbing
             return true;
         }
 
-        // TODO: duplication?
-        bool enqueue(T&& e) noexcept
-        {
-            // inexpensive check before acquiring lock
-            if (!open_) { return false; }
-
-            std::unique_lock<std::mutex> lock(mutex_);
-            while(!writeHeadroom())
-            {
-                readyForWrite_.wait(lock);
-                // check if we can write again,
-                // since it could have changed
-                if (!open_) { return false; }
-            }
-
-            // perform actual write
-            fifo_[write_] = e;
-            incrementWrite();
-
-            readyForRead_.notify_one();
-
-            return true;
-        }
-
-        // TODO: make nothrow
         /**
          * Closes the pipe for writing.
          *
@@ -882,7 +857,7 @@ namespace Plumbing
             typedef std::shared_ptr<Pipe<Expected<Out>>> pipe_type;
 
             template <typename S, typename Func>
-            static Source<pipe_type> connect(S&& source, Func func, size_t capacity = 3)
+            static Source<pipe_type> connect(S&& source, Func func, size_t capacity = 10)
             {
                 static_assert( is_source<S>::value,
                         "Cannot chain filters to a non-Source type. "
