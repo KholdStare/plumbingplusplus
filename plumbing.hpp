@@ -463,6 +463,68 @@ namespace Plumbing
 
     //========================================================
 
+    // TODO: temporary hack
+    template <typename T>
+    using PipeSink = std::back_insert_iterator< std::vector<T> >;
+    
+    namespace detail
+    {
+        
+        template <
+                  typename In,
+                  typename Out,
+                  class FuncObject ///< function object with templated operator()
+                 >
+        class iterator_filter
+        {
+            // some static checks to ensure everything's legit.
+            //static_assert( std::is_base_of<std::input_iterator_tag, SOURCE::iterator_tag>,
+                           //"SOURCE type must be an input iterator." );
+            //static_assert( std::is_base_of<std::output_iterator_tag, SINK::iterator_tag>,
+                           //"SINK type must be an output iterator." );
+
+            FuncObject func_;
+
+        public:
+            typedef In input_type;
+            typedef Out return_type;
+
+            iterator_filter(FuncObject const& func) 
+                : func_(func)
+            { }
+
+            iterator_filter(FuncObject&& func) 
+                : func_(std::move(func))
+            { }
+
+            template <typename InputIt, typename OutputIt>
+            inline void operator() (InputIt&& in_first, InputIt&& in_last, OutputIt&& out_first)
+            {
+                func_(std::forward<InputIt>(in_first),
+                      std::forward<InputIt>(in_last),
+                      std::forward<OutputIt>(out_first));
+            }
+
+        };
+
+            /**
+             * Stores function that takes input iterators and output iterator.
+             */
+        
+    } /* detail */ 
+
+    template <typename In, typename Out, class FuncObject>
+    detail::iterator_filter<In, Out, typename std::remove_reference<FuncObject>::type >
+    makeIteratorFilter(FuncObject&& func)
+    {
+        return detail::iterator_filter<In,
+                                       Out,
+                                       typename std::remove_reference<FuncObject>::type
+                                      >( std::forward<FuncObject>(func) );
+    }
+
+    //========================================================
+
     namespace detail
     {
 
@@ -637,7 +699,7 @@ namespace Plumbing
             typedef std::shared_ptr<Pipe<Expected<Out>>> pipe_type;
 
             template <typename S, typename Func>
-            static Sink<Out> connect(S&& source, Func func, size_t capacity = 3)
+            static Source<pipe_type> connect(S&& source, Func func, size_t capacity = 3)
             {
                 static_assert( is_source<S>::value,
                         "Cannot chain filters to a non-Source type. "

@@ -246,6 +246,65 @@ BOOST_AUTO_TEST_CASE( read_closing_when_full )
 BOOST_AUTO_TEST_SUITE_END()
 //____________________________________________________________________________//
 
+BOOST_AUTO_TEST_SUITE( source_tests )
+
+BOOST_AUTO_TEST_CASE( source_create )
+{
+    move_checker checker;
+
+    Source<move_checker> source = makeSource(checker);
+
+    BOOST_CHECK_EQUAL( checker.copies(), 0 );
+    BOOST_CHECK_EQUAL( checker.moves(), 0 );
+}
+
+BOOST_AUTO_TEST_CASE( sink_connect )
+{
+    move_checker checker;
+
+    Source<move_checker> source = makeSource(checker);
+
+    auto inc = [](int i) { return i+1; };
+
+    Sink<int> sink = connect(source, inc);
+
+    std::vector<int> results;
+    std::copy(std::begin(sink), std::end(sink),
+            std::back_inserter(results));
+
+    std::vector<int> expectedResults;
+    std::transform(std::begin(checker), std::end(checker),
+            std::back_inserter(expectedResults), inc);
+
+    BOOST_CHECK_EQUAL( results.size(), expectedResults.size() );
+    size_t size = results.size();
+    for (size_t i = 0; i < size; ++i)
+    {
+        BOOST_CHECK_EQUAL( results[i], expectedResults[i] );
+    }
+
+    BOOST_CHECK_EQUAL( checker.copies(), 0 );
+    BOOST_CHECK_EQUAL( checker.moves(), 0 );
+}
+
+BOOST_AUTO_TEST_CASE( source_from_pipe )
+{
+    move_checker checker;
+
+    auto sharedPipe = std::make_shared<Pipe<move_checker>>();
+    Source<std::shared_ptr<Pipe<move_checker>>> source = makeSource(sharedPipe);
+
+    sharedPipe->enqueue(std::move(checker));
+
+    move_checker result = source.impl().next();
+
+    BOOST_CHECK_EQUAL( checker.copies(), 2 );
+    BOOST_CHECK_EQUAL( checker.moves(), 0 );
+}
+
+BOOST_AUTO_TEST_SUITE_END()
+//____________________________________________________________________________//
+
 BOOST_AUTO_TEST_SUITE(perfect_forwarding)
 
 BOOST_AUTO_TEST_CASE( move_checker_init )
@@ -536,60 +595,39 @@ BOOST_AUTO_TEST_CASE( two_part_pipeline )
 BOOST_AUTO_TEST_SUITE_END()
 //____________________________________________________________________________//
 
-// TODO: reintroduce once Source class in introduced
-BOOST_AUTO_TEST_SUITE( source_tests )
+BOOST_AUTO_TEST_SUITE( iterator_filter_tests )
 
-BOOST_AUTO_TEST_CASE( source_create )
+/**
+ * Wraps std::copy so it can be passed uninstantiated
+ */
+struct copy_wrapper
+{
+
+    template <typename InputIt, typename OutputIt>
+    void operator() (InputIt&& in_first, InputIt&& in_last, OutputIt&& out_first)
+    {
+        std::copy(std::forward<InputIt>(in_first),
+                  std::forward<InputIt>(in_last),
+                  std::forward<OutputIt>(out_first));
+    }
+};
+
+
+BOOST_AUTO_TEST_CASE( int_copy )
 {
     move_checker checker;
 
-    Source<move_checker> source = makeSource(checker);
+    std::vector<int> expected;
+    std::copy(checker.begin(), checker.end(), std::back_inserter(expected));
 
-    BOOST_CHECK_EQUAL( checker.copies(), 0 );
-    BOOST_CHECK_EQUAL( checker.moves(), 0 );
-}
-
-BOOST_AUTO_TEST_CASE( sink_connect )
-{
-    move_checker checker;
-
-    Source<move_checker> source = makeSource(checker);
-
-    auto inc = [](int i) { return i+1; };
-
-    Sink<int> sink = connect(source, inc);
+    auto iterfilter = makeIteratorFilter<int, int>(copy_wrapper());
 
     std::vector<int> results;
-    std::copy(std::begin(sink), std::end(sink),
-            std::back_inserter(results));
+    iterfilter(checker.begin(), checker.end(), std::back_inserter(results));
 
-    std::vector<int> expectedResults;
-    std::transform(std::begin(checker), std::end(checker),
-            std::back_inserter(expectedResults), inc);
-
-    BOOST_CHECK_EQUAL( results.size(), expectedResults.size() );
-    size_t size = results.size();
-    for (size_t i = 0; i < size; ++i)
-    {
-        BOOST_CHECK_EQUAL( results[i], expectedResults[i] );
-    }
-
+    BOOST_CHECK_EQUAL( expected.size(), results.size() );
+    BOOST_CHECK( expected == results );
     BOOST_CHECK_EQUAL( checker.copies(), 0 );
-    BOOST_CHECK_EQUAL( checker.moves(), 0 );
-}
-
-BOOST_AUTO_TEST_CASE( source_from_pipe )
-{
-    move_checker checker;
-
-    auto sharedPipe = std::make_shared<Pipe<move_checker>>();
-    Source<std::shared_ptr<Pipe<move_checker>>> source = makeSource(sharedPipe);
-
-    sharedPipe->enqueue(std::move(checker));
-
-    move_checker result = source.impl().next();
-
-    BOOST_CHECK_EQUAL( checker.copies(), 2 );
     BOOST_CHECK_EQUAL( checker.moves(), 0 );
 }
 
@@ -718,8 +756,6 @@ BOOST_AUTO_TEST_SUITE_END()
 //____________________________________________________________________________//
 
 BOOST_AUTO_TEST_SUITE( exception_propagation )
-
-
 
 BOOST_AUTO_TEST_CASE( one_exception )
 {
