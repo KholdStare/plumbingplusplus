@@ -147,12 +147,13 @@ namespace Plumbing
          *
          * The read side will attempt to read any remaining values in the pipe.
          *
-         * @note: could deadlock from read side:
+         * @note: could deadlock if used from the read side:
          *       - no space to write, because read side not clear.
          *       - read side tries to close, when there is no space to write
+         *       - waits indefinitely for room to write.
          *
          * @note: DO NOT USE FROM read side. Use forceClose() instead, if you
-         * do not intend to read any more, and are "abandoning ship".
+         * do not intend to read anymore and are "abandoning ship".
          */
         void close() noexcept
         {
@@ -338,8 +339,6 @@ namespace Plumbing
 
     //========================================================
 
-    // TODO: create a "Source" class to encapsulate an input to a pipe, so ">>"
-    // can be used safely
     /**
      * The Source encapsulates the input into a pipeline. It acts as a thing
      * functionality wrapper around an iterable, but allows passing of extra
@@ -529,6 +528,10 @@ namespace Plumbing
     namespace detail
     {
         
+        /**
+         * A thin wrapper around a function object, to help out with
+         * input/output type deduction, when connecting functions in a pipeline
+         */
         template <
                   typename In,
                   typename Out,
@@ -564,14 +567,6 @@ namespace Plumbing
                 static_assert( std::is_same<typename std::remove_reference<InputItFirst>::type,
                                             typename std::remove_reference<InputItLast>::type>::value,
                                "Input iterator types for begin/end must match." );
-
-                // some static checks to ensure everything's legit.
-                //static_assert( std::is_base_of<std::input_iterator_tag,
-                                               //typename InputIt::iterator_tag>,
-                               //"SOURCE type must be an input iterator." );
-                //static_assert( std::is_base_of<std::output_iterator_tag,
-                                               //typename OutputIt::iterator_tag>,
-                               //"SINK type must be an output iterator." );
 
                 func_(std::forward<InputItFirst>(in_first),
                       std::forward<InputItLast>(in_last),

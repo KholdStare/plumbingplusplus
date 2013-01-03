@@ -11,7 +11,7 @@ As an example, say you have a nice set of composable functions, and you want to
 feed data through them:
 
     Image<RGB> loadImage(std::string path);
-    Image<RGB>& processImage(Image<RGB>& image);
+    Image<RGB> processImage(Image<RGB> const& image);
     void saveImage(Image<RGB>const& image);
 
 To process several images, the simple imperative approach is a for loop:
@@ -31,28 +31,27 @@ being read, while another was being processed, while another was being saved?
 
 Enter Plumbing++, which automatically creates threads for each processing step,
 and joins each with a concurrent FIFO:
-
     
     std::vector<std::string> paths{"tree.jpg", "mountain.jpg", "car.jpg"};
 
     (Plumbing::makeSource(paths) >> loadImage >> processImage >> saveImage).wait();
 
-Done! Each connection takes an iterable object, and returns the end of a
-concurrent FIFO called a Sink:
+Done! Each connection create a concurrent FIFO, called a Pipe. The read side of
+this Pipe is returned in the form of an iterable object:
 
-    Plumbing::Sink<Image<RGB>> imageSink = (paths >> loadImage)
+    Plumbing::PipeSource<Image<RGB>> imageSource = (paths >> loadImage);
 
 These can be freely iterated over, or used in STL algorithms:
 
     std::vector<Image<RGB>> imageCopies;
-    std::copy(imageSink.begin(), imageSink.end(), std::back_inserter(imageCopies));
+    std::copy(imageSource.begin(), imageSource.end(), std::back_inserter(imageCopies));
 
-    for (auto&& elem : anotherSink)
+    for (auto&& elem : anotherSource)
     {
         std::cout << elem << std::endl;
     }
 
-Each Sink (being iterable) thus becomes the input to the next
+Each PipeSource (being iterable) thus becomes the input to the next
 connection. If the last function in the pipeline returns void, the connect call
 returns a future, so the caller can wait for the whole computation to complete:
 
@@ -72,11 +71,43 @@ culprit exception in the future:
         // deal with exception
     }
 
-For those opposed to operator overloading, a variadic function "connect" that does the same thing:
+For those opposed to operator overloading, a variadic function "connect" that
+does the same thing:
 
     Plumbing::connect(Plumbing::makeSource(paths),
                       loadImage, processImage, saveImage).wait();
 
+Any single input/single output callable object is supported, including
+ordinary functions, lambdas, and any function object.
+
+If one of your functions is required to be assymetric, such as combining
+several input values into one output, this can be done using iterators. As an
+example, to merge several images into a single HDR, you might have a function
+object:
+
+    // As an example, creates one image for every three,
+    // effectively merging them
+    struct mergeHDR
+    {
+        template <typename InputIterator, typename OutputIterator>
+        void operator() (InputIterator first,
+                         InputIterator last,
+                         OutputIterator dest);
+    }
+
+Such a function object can now be used in a pipeline:
+
+    std::futute<void> fut =
+        Plumbing::makeSource(paths)
+        >> loadImage
+        >> Plumbing::makeIteratorFilter<Image<RGB>, Image<RGB>>(mergeHDR())
+        >> saveImage;
+
+    fut.get();
+
+Unfortunately, since working with iterators requires function templates,
+input/return types cannot be deduced automatically as with other examples, and
+have to be provided manually.
 
 ## Progress/Flaws
 
@@ -125,8 +156,8 @@ the use of operator &gt;&gt;
 
 *UPDATE* I have decided to kill two birds with one stone. The new Source class
 encapsulates any iterable, including a Pipe- however, it is polymorphic at
-compile time, so has zero overhead. A Sink is just a type alias for a Source
-over Pipes.
+compile time, so has zero overhead. A PipeSource is just a type alias for a
+Source over Pipes.
 
 ## Future Work/Ideas
 
@@ -138,25 +169,7 @@ Single input, single output functions are a small subset of the functions one
 would want to pipeline, so here are a few ideas on how to incorporate those into
 the library as well.
 
-First, functions that are "asymmetric" they require several items of the same
-input type and produce only a single output (or vice versa). These can be defined
-through iterators:
-
-    // As an example, creates one image for every three,
-    // effectively merging them
-    template <typename InputIterator, typename OutputIterator>
-    void mergeHDR(InputIterator& first,
-                  InputIterator& last,
-                  OutputIterator& dest);
-
-    // pipeline saves a single merged image for every 3 paths given
-    (paths >> loadImage >> mergeHDR >> saveImage).wait();
-
-There might be problems automatically deducing whether a callable entity is the
-first kind (one input, one output) vs the second kind (returns void, but works
-on iterators). Template trickery will have to be employed.
-
-Other functions could take several arguments of different types, and return
+Some functions could take several arguments of different types, and return
 something else:
 
     /**
