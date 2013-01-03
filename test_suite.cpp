@@ -266,7 +266,7 @@ BOOST_AUTO_TEST_CASE( sink_connect )
 
     auto inc = [](int i) { return i+1; };
 
-    Sink<int> sink = connect(source, inc);
+    PipeSource<int> sink = connect(source, inc);
 
     std::vector<int> results;
     std::copy(std::begin(sink), std::end(sink),
@@ -774,7 +774,7 @@ BOOST_AUTO_TEST_CASE( one_exception )
 
     auto intSource = makeSource(checker);
 
-    Sink<int> sink = ( intSource >> thrower );
+    PipeSource<int> sink = ( intSource >> thrower );
 
     BOOST_REQUIRE_EQUAL( true, sink.impl().hasNext() );
     Expected<int> e = sink.impl().next();
@@ -803,7 +803,7 @@ BOOST_AUTO_TEST_CASE( delayed_exception )
 
     // set up source and pipeline
     auto intSource = makeSource(checker);
-    Sink<int> sink = ( intSource >> thrower );
+    PipeSource<int> sink = ( intSource >> thrower );
 
     // loop through first valid values
     for (int i = 1; i < failIndex; ++i)

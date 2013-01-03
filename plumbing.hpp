@@ -6,9 +6,9 @@
 //    (See accompanying file LICENSE_1_0.txt or copy at
 //          http://www.boost.org/LICENSE_1_0.txt)
 
-#include <cassert>
-
 #include "expected.hpp"
+
+#include <cassert>
 
 #include <vector>
 #include <mutex>
@@ -120,6 +120,30 @@ namespace Plumbing
          * @return whether the operation succeeded.
          */
         bool enqueue(T const& e) noexcept
+        {
+            // inexpensive check before acquiring lock
+            if (!open_) { return false; }
+
+            std::unique_lock<std::mutex> lock(mutex_);
+            while(!writeHeadroom())
+            {
+                readyForWrite_.wait(lock);
+                // check if we can write again,
+                // since it could have changed
+                if (!open_) { return false; }
+            }
+
+            // perform actual write
+            fifo_[write_] = e;
+            incrementWrite();
+
+            readyForRead_.notify_one();
+
+            return true;
+        }
+
+        // TODO: duplication?
+        bool enqueue(T&& e) noexcept
         {
             // inexpensive check before acquiring lock
             if (!open_) { return false; }
@@ -459,13 +483,73 @@ namespace Plumbing
      * Type alias that encapsulates the output of Pipe<Expected<T>
      */
     template <typename T>
-    using Sink = Source< std::shared_ptr<Pipe<Expected<T>>> >;
+    using PipeSource = Source< std::shared_ptr<Pipe<Expected<T>>> >;
 
     //========================================================
 
-    // TODO: temporary hack
     template <typename T>
-    using PipeSink = std::back_insert_iterator< std::vector<T> >;
+    class PipeSink
+    {
+    public:
+        typedef T value_type;
+        typedef std::shared_ptr<Pipe<value_type>> pipe_type; // TODO: could be just a reference?
+        typedef value_type return_type;
+
+        typedef PipeSink<T> iterator;
+        typedef value_type* pointer;
+        typedef value_type& reference;
+        typedef std::output_iterator_tag iterator_category;
+        typedef void difference_type;
+
+        PipeSink()
+            : pipe_()
+        { }
+
+        PipeSink(pipe_type const& pipe)
+            : pipe_(pipe)
+        { }
+
+        PipeSink(pipe_type&& pipe)
+            : pipe_(std::move(pipe))
+        { }
+
+        PipeSink(PipeSink&&) = default;
+        PipeSink(PipeSink const&) = default;
+
+        iterator& begin() { return *this; }
+        iterator  end()   { return iterator(); }
+
+        iterator& operator ++ ()    { return *this; } ///< noop
+        iterator& operator ++ (int) { return *this; } ///< noop
+
+        iterator& operator * ()     { return *this; } ///< noop
+
+        template <typename U>
+        void operator = (U&& val)
+        {
+            // TODO: maybe throw exception if closed
+            if (!pipe_->enqueue(std::forward<U>(val)))
+            {
+                throw std::range_error("Tried to enqueue into a closed pipe");
+            }
+        }
+
+    private:
+        pipe_type pipe_;
+    };
+
+    /**
+     * Convenience method to construct a PipeSink<T> from the intake of the
+     * pipe.
+     */
+    template <typename T>
+    PipeSink<T>
+    makePipeSink(std::shared_ptr<Pipe<T>> const& pipe)
+    {
+        return PipeSink<T>(pipe);
+    }
+
+    //========================================================
     
     namespace detail
     {
@@ -477,17 +561,19 @@ namespace Plumbing
                  >
         class iterator_filter
         {
-            // some static checks to ensure everything's legit.
-            //static_assert( std::is_base_of<std::input_iterator_tag, SOURCE::iterator_tag>,
-                           //"SOURCE type must be an input iterator." );
-            //static_assert( std::is_base_of<std::output_iterator_tag, SINK::iterator_tag>,
-                           //"SINK type must be an output iterator." );
 
+            /**
+             * Stores function that takes input iterators and output iterator.
+             */
             FuncObject func_;
 
         public:
             typedef In input_type;
             typedef Out return_type;
+
+            // TODO: if (>>) et al. are move enabled, this can be deleted
+            iterator_filter(iterator_filter const&) = default;
+            iterator_filter(iterator_filter&&) = default;
 
             iterator_filter(FuncObject const& func) 
                 : func_(func)
@@ -497,19 +583,28 @@ namespace Plumbing
                 : func_(std::move(func))
             { }
 
-            template <typename InputIt, typename OutputIt>
-            inline void operator() (InputIt&& in_first, InputIt&& in_last, OutputIt&& out_first)
+            template <typename InputItFirst, typename InputItLast, typename OutputIt>
+            inline void operator() (InputItFirst&& in_first, InputItLast&& in_last, OutputIt&& out_first)
             {
-                func_(std::forward<InputIt>(in_first),
-                      std::forward<InputIt>(in_last),
+                static_assert( std::is_same<typename std::remove_reference<InputItFirst>::type,
+                                            typename std::remove_reference<InputItLast>::type>::value,
+                               "Input iterator types for begin/end must match." );
+
+                // some static checks to ensure everything's legit.
+                //static_assert( std::is_base_of<std::input_iterator_tag,
+                                               //typename InputIt::iterator_tag>,
+                               //"SOURCE type must be an input iterator." );
+                //static_assert( std::is_base_of<std::output_iterator_tag,
+                                               //typename OutputIt::iterator_tag>,
+                               //"SINK type must be an output iterator." );
+
+                func_(std::forward<InputItFirst>(in_first),
+                      std::forward<InputItLast>(in_last),
                       std::forward<OutputIt>(out_first));
             }
 
         };
 
-            /**
-             * Stores function that takes input iterators and output iterator.
-             */
         
     } /* detail */ 
 
@@ -588,7 +683,7 @@ namespace Plumbing
         struct connect_traits<T>
         {
             typedef T return_type;
-            typedef Sink<return_type> monadic_type;
+            typedef PipeSource<return_type> monadic_type;
         };
 
         /**
@@ -611,6 +706,25 @@ namespace Plumbing
         private:
             // figure out the return type of the function
             typedef decltype( std::declval<Func>()( std::declval<T&>() )) T2;
+
+            // fold
+            typedef connect_traits<T2, Funcs...> helper_type;
+        public:
+            typedef typename helper_type::return_type return_type;
+            typedef typename helper_type::monadic_type monadic_type;
+        };
+
+
+        /**
+         * Specialization for iterator_filter
+         */
+        template <typename T, typename In, typename Out, class FuncObject, typename... Funcs>
+        struct connect_traits<T, iterator_filter<In, Out, FuncObject>, Funcs...>
+        {
+        private:
+            typedef iterator_filter<In, Out, FuncObject> filter_type;
+            // figure out the return type of the function
+            typedef typename filter_type::return_type T2;
 
             // fold
             typedef connect_traits<T2, Funcs...> helper_type;
@@ -652,6 +766,9 @@ namespace Plumbing
             }
         };
 
+        /**
+         * Specialization for Expected<T> input.
+         */
         template <typename S, typename In, typename Func, typename Out>
         struct thread_task<S, Expected<In>, Func, Out>
         {
@@ -691,6 +808,72 @@ namespace Plumbing
             }
         };
 
+        /**
+         * Another thread_task struct that is a special case for iterator filters
+         */
+        template <typename S, typename Out, typename IterFilter>
+        struct thread_task_iter
+        {
+            // TODO: add check that in/out are convertible to iterfilter in/out
+
+            static_assert( std::is_convertible<Out, typename IterFilter::return_type>::value,
+                           "Make sure input/output types are correctly specified"
+                           "on the iterator filter.");
+
+            typedef IterFilter filter_type;
+            typedef std::shared_ptr<Pipe<Expected<Out>>> pipe_type;
+
+            /**
+             * Task to be performed by the dedicated thread
+             */
+            static void invoke(S&& source, filter_type func, pipe_type const& pipe)
+            {
+                auto intake = makePipeSink(pipe);
+                // TODO: use scope guard
+                try
+                {
+                    // call the iterator filter.
+                    // if the internal function tries to write to a closed
+                    // pipe, such as in the situation where an exception was
+                    // thrown downstream already, another exception will be thrown
+                    // by the intake iterator, and be "swallowed" below.
+                    func(source.begin(), source.end(), intake.begin());
+                }
+                catch (...)
+                {
+                    pipe->enqueue(Expected<Out>::fromException());
+                }
+
+                pipe->close();
+                source.impl().close();
+            }
+        };
+
+        /**
+         * Specialization for iterator_filter function object.
+         *
+         * @note The indirection is necessary because we need to define this
+         * twice, once for input type In, and another for Expected<In>. Without
+         * the Expected<In> specialization, the compiler can't disambiguate
+         * between two template specializations, (one for just Expected<In> and
+         * just iterator_filter). By specializing for both Expected<In> and
+         * iterator_filter at the same time, no ambiguities arise. However,
+         * duplication arises, hence another layer of indirection by inheriting
+         * from the actual implementation, which works the same way for type In
+         * and Expected<In>.
+         */
+        template <typename S, typename In, typename Out,
+                  typename IterFilterIn, typename IterFilterOut, typename FuncObject>
+        struct thread_task<S, In, iterator_filter<IterFilterIn, IterFilterOut, FuncObject>, Out>
+               : thread_task_iter<S, Out, iterator_filter<IterFilterIn, IterFilterOut, FuncObject>>
+        { };
+
+        template <typename S, typename In, typename Out,
+                  typename IterFilterIn, typename IterFilterOut, typename FuncObject>
+        struct thread_task<S, Expected<In>, iterator_filter<IterFilterIn, IterFilterOut, FuncObject>, Out>
+               : thread_task_iter<S, Out, iterator_filter<IterFilterIn, IterFilterOut, FuncObject>>
+        { };
+
         //========================================================
 
         template <typename In, typename Out>
@@ -710,13 +893,6 @@ namespace Plumbing
                 // start processing thread
                 std::thread processingThread(
                         thread_task<S, In, Func, Out>::invoke,
-                        //[pipe, func](S&& source) mutable
-                        //{
-                            //for (auto&& e : source) {
-                                //pipe->enqueue(func(e));
-                            //}
-                            //pipe->close();
-                        //},
                         detail::async_forwarder<S>(std::forward<S>(source)),
                         func,
                         pipe
@@ -727,32 +903,6 @@ namespace Plumbing
                 return makeSource(std::move(pipe));
             }
 
-        private:
-            /**
-             * Task to be performed by the dedicated thread
-             */
-            template <typename S, typename Func>
-            static void thread_task_blah(S&& source, Func func, pipe_type pipe)
-            {
-                while (source.impl().hasNext())
-                {
-                    // TODO: use scope guard
-                    try
-                    {
-                        if ( !pipe->enqueue(func(source.impl().next())) )
-                        {
-                            break;
-                        }
-                    }
-                    catch (...)
-                    {
-                        pipe->enqueue(Expected<Out>::fromException());
-                        break;
-                    }
-                }
-                pipe->close();
-                source.impl().close();
-            }
         };
 
         template <typename In>

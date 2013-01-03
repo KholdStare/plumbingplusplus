@@ -46,6 +46,16 @@ void testSplitting()
     b.join();
 }
 
+struct copy_wrapper
+{
+
+    template <typename InputIt, typename OutputIt>
+    void operator() (InputIt in_first, InputIt in_last, OutputIt&& out_first)
+    {
+        std::copy(in_first, in_last, std::forward<OutputIt>(out_first));
+    }
+};
+
 int main(int argc, char const *argv[])
 {
     std::vector<std::string> vals{"Hello", "Concurrent", "World", "Of"};
@@ -85,8 +95,15 @@ int main(int argc, char const *argv[])
         };
 
     ( makeSource(vals) >> getFirstChar >> printLine<char> ).wait();
-    connect( makeSource(vals), getFirstChar, printLine<char> ).wait();
     connect( makeSource(vals), printLine<std::string>).wait();
+
+    auto fut = 
+        makeSource(vals)
+        >> getFirstChar
+        >> makeIteratorFilter<char, char>(copy_wrapper())
+        >> printLine<char>;
+
+    fut.get();
 
     return 0;
 }
