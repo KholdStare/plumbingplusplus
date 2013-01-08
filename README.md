@@ -107,7 +107,7 @@ Such a function object can now be used in a pipeline:
 
 Unfortunately, since working with iterators requires function templates,
 input/return types cannot be deduced automatically as with other examples, and
-have to be provided manually.
+have to be provided manually as template arguments to makeIteratorFilter.
 
 ## Progress/Flaws
 
