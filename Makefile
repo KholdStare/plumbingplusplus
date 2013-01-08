@@ -2,8 +2,8 @@ PROGS=plumbing_test test_suite
 
 CC=g++-4.7
 
-DEBUGFLAGS= -g -DDEBUG
-CFLAGS= -Wall -Werror -DUNIX -std=c++11 $(DEBUGFLAGS)
+DEBUGFLAGS= -g -pg
+CFLAGS= -Wall -Werror -std=c++0x $(DEBUGFLAGS)
 
 LIBS= -lpthread -lboost_unit_test_framework
 
